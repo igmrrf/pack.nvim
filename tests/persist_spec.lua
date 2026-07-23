@@ -32,6 +32,11 @@ describe("packui.persist", function()
     assert.same({}, persist.load())
   end)
 
+  it("returns an empty set when json is an object instead of array", function()
+    vim.fn.writefile({ '{"foo.nvim": true}' }, tmp_path)
+    assert.same({}, persist.load())
+  end)
+
   it("set_disabled adds and removes membership, persisting each time", function()
     persist.set_disabled("foo.nvim", true)
     assert.is_true(persist.load()["foo.nvim"])
