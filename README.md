@@ -25,7 +25,7 @@ if not vim.uv.fs_stat(packui_path) then
     "git",
     "clone",
     "--filter=blob:none",
-    "https://github.com/igmrrf/packui.nvim.git", -- Replace USERNAME
+    "https://github.com/igmrrf/vimpack.git",
     "--branch=main",
     packui_path,
   })
@@ -38,7 +38,7 @@ end
 require("packui").setup({
   plugins = {
     -- Let Pack UI manage itself!
-    { "igmrrf/packui.nvim" },
+    { "igmrrf/vimpack" },
 
     -- Example: Auto-loaded dependency
     { "nvim-lua/plenary.nvim" },
