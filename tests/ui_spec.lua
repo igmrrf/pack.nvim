@@ -84,4 +84,40 @@ describe("packui.ui", function()
       assert.is_true(text:match("Packui Keymaps") ~= nil)
     end)
   end)
+
+  describe("details popups", function()
+    it("show_details opens a popup naming the plugin under cursor", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.show_details()
+      local popup_buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false)
+      assert.is_true(vim.tbl_contains(lines, "  foo.nvim"))
+    end)
+
+    it("show_full_details reports no commit info for a non-git directory", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.show_full_details()
+      local popup_buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false)
+      local found = false
+      for _, l in ipairs(lines) do
+        if l:match("no commit info available") then
+          found = true
+        end
+      end
+      assert.is_true(found)
+    end)
+  end)
 end)

@@ -65,6 +65,71 @@ function M.show_help()
   open_popup(lines, { close_keys = { "q", "?", "<Esc>" } })
 end
 
+local function plugin_at_cursor()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  return plugin_map[cursor[1]]
+end
+
+local function trigger_summary(p)
+  local parts = {}
+  if p.cmd then table.insert(parts, "cmd=" .. vim.inspect(p.cmd)) end
+  if p.event then table.insert(parts, "event=" .. vim.inspect(p.event)) end
+  if p.ft then table.insert(parts, "ft=" .. vim.inspect(p.ft)) end
+  if p.keys then table.insert(parts, "keys=" .. vim.inspect(p.keys)) end
+  if #parts == 0 then
+    return "none"
+  end
+  return table.concat(parts, ", ")
+end
+
+local function quick_detail_lines(p)
+  return {
+    "  " .. p.name,
+    "  " .. string.rep("=", #p.name),
+    "",
+    "  url:      " .. p.url,
+    "  status:   " .. p.status,
+    "  dir:      " .. p.dir,
+    "  lazy:     " .. tostring(p.lazy),
+    "  trigger:  " .. trigger_summary(p),
+    "  disabled: " .. tostring(p.disabled),
+  }
+end
+
+function M.show_details()
+  local p = plugin_at_cursor()
+  if not p then
+    return
+  end
+  open_popup(quick_detail_lines(p), { height_pct = 0.4 })
+end
+
+function M.show_full_details()
+  local p = plugin_at_cursor()
+  if not p then
+    return
+  end
+
+  local lines = quick_detail_lines(p)
+
+  local commit_line = "(no commit info available)"
+  if vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+    local result = vim.fn.system({ "git", "-C", p.dir, "log", "-1", "--format=%h %s" })
+    if vim.v.shell_error == 0 and result ~= "" then
+      commit_line = vim.trim(result)
+    end
+  end
+  table.insert(lines, "  commit:   " .. commit_line)
+
+  if p.behind ~= nil then
+    table.insert(lines, "  behind:   " .. tostring(p.behind) .. " commit(s)")
+  else
+    table.insert(lines, "  behind:   not checked")
+  end
+
+  open_popup(lines, { height_pct = 0.5 })
+end
+
 function M.open(config)
   config_ref = config
   if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -98,45 +163,21 @@ function M.open(config)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "q", "<Cmd>close<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "?", "<Cmd>lua require('packui.ui').show_help()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackuiSync<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
-  
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_details()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "K", "<Cmd>lua require('packui.ui').show_full_details()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
+
   M.update()
 end
 
 function M.show_log()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line_idx = cursor[1]
-  local p = plugin_map[line_idx]
+  local p = plugin_at_cursor()
   if not p or not p.log or #p.log == 0 then
     vim.notify("No logs available for this item.", vim.log.levels.INFO)
     return
   end
-  
-  local log_buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[log_buf].bufhidden = "wipe"
-  vim.bo[log_buf].buftype = "nofile"
-  vim.bo[log_buf].swapfile = false
-  
-  vim.api.nvim_buf_set_lines(log_buf, 0, -1, false, p.log)
-  vim.bo[log_buf].filetype = "packui_log"
-  vim.bo[log_buf].modifiable = false
-  
-  local width = math.floor(vim.o.columns * 0.6)
-  local height = math.floor(vim.o.lines * 0.6)
-  local row = math.floor((vim.o.lines - height) / 2)
-  local col = math.floor((vim.o.columns - width) / 2)
-  
-  local log_win = vim.api.nvim_open_win(log_buf, true, {
-    relative = "editor",
-    width = width,
-    height = height,
-    row = row,
-    col = col,
-    border = "rounded",
-    style = "minimal"
-  })
-  vim.wo[log_win].wrap = true
-  vim.api.nvim_buf_set_keymap(log_buf, "n", "q", "<Cmd>close<CR>", { noremap = true, silent = true })
+  local buf = open_popup(p.log, { wrap = true })
+  vim.bo[buf].filetype = "packui_log"
 end
 
 function M.update()
@@ -203,7 +244,7 @@ function M.update()
   render_group("Installed (Not Loaded)", groups.installed, config_ref.ui.icons.loaded, "DiagnosticInfo")
   render_group("Errors", groups.error, config_ref.ui.icons.error, "DiagnosticError")
   
-  table.insert(lines, "  Press [S] to Sync, [Enter] to view logs, [q] to quit")
+  table.insert(lines, "  Press [S] to Sync, [Enter] for details, [l] for logs, [q] to quit")
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Comment" })
   
   vim.bo[buf_id].modifiable = true
