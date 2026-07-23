@@ -54,4 +54,31 @@ describe("packui.loader triggers", function()
     local ok = pcall(loader.enable, p)
     assert.is_true(ok)
   end)
+
+  it("remove_triggers respects command ownership after collision", function()
+    -- Regression test: Plugin A registers :Foo, Plugin B later overwrites it.
+    -- Removing A should NOT delete :Foo because B now owns it.
+    local p_a = make_plugin({ name = "plugin_a.nvim", cmd = "CollisionCmd" })
+    local p_b = make_plugin({ name = "plugin_b.nvim", cmd = "CollisionCmd" })
+
+    -- A registers the command
+    loader.setup_triggers(p_a)
+    local commands = vim.api.nvim_get_commands({})
+    assert.is_not_nil(commands["CollisionCmd"])
+
+    -- B overwrites it
+    loader.setup_triggers(p_b)
+    commands = vim.api.nvim_get_commands({})
+    assert.is_not_nil(commands["CollisionCmd"])
+
+    -- Remove A's triggers - should NOT delete the command since B owns it
+    loader.remove_triggers(p_a)
+    commands = vim.api.nvim_get_commands({})
+    assert.is_not_nil(commands["CollisionCmd"], "Command should still exist and belong to B")
+
+    -- Clean up B's command
+    loader.remove_triggers(p_b)
+    commands = vim.api.nvim_get_commands({})
+    assert.is_nil(commands["CollisionCmd"])
+  end)
 end)

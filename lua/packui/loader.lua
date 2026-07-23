@@ -165,8 +165,8 @@ function M.remove_triggers(p)
   if p.cmd then
     local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
     for _, cmd in ipairs(cmds) do
-      pcall(vim.api.nvim_del_user_command, cmd)
       if seen_cmds[cmd] == p.name then
+        pcall(vim.api.nvim_del_user_command, cmd)
         seen_cmds[cmd] = nil
       end
     end
