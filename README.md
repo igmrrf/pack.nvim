@@ -78,6 +78,25 @@ require("packui").setup({
 })
 ```
 
+### Adopting existing `vim.pack` plugins
+
+`vim.pack` always installs into `<stdpath("data")>/site/pack/core/opt/<name>`, deriving `<name>` from
+the repo's basename — the exact same `pack/<group>/opt/<name>` layout Pack UI uses. Point `install_path`
+at that same directory and Pack UI recognizes every already-installed plugin as `installed` immediately,
+with no re-clone:
+
+```lua
+require("packui").setup({
+  install_path = vim.fn.stdpath("data") .. "/site/pack/core",
+  plugins = {
+    { "nvim-lua/plenary.nvim" }, -- already on disk from vim.pack.add() -> just gets packadd'd
+  },
+})
+```
+
+Make sure nothing else still calls `vim.pack.add()`/`vim.pack.update()` for the same plugins once Pack
+UI is managing them — both would otherwise try to install/update the same directories.
+
 ### Bulk keymaps
 
 `require("packui").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
