@@ -39,7 +39,15 @@ function M.init(config)
   for _, p in ipairs(config.plugins) do
     local normalized = normalize(p)
     local path_type = normalized.lazy and "opt" or "start"
+    local other_path_type = normalized.lazy and "start" or "opt"
     normalized.dir = config.install_path .. "/" .. path_type .. "/" .. normalized.name
+    local other_dir = config.install_path .. "/" .. other_path_type .. "/" .. normalized.name
+    
+    if vim.fn.isdirectory(normalized.dir) == 0 and vim.fn.isdirectory(other_dir) == 1 then
+      local parent_dir = vim.fn.fnamemodify(normalized.dir, ":h")
+      vim.fn.mkdir(parent_dir, "p")
+      vim.fn.rename(other_dir, normalized.dir)
+    end
     
     if vim.fn.isdirectory(normalized.dir) == 1 then
       normalized.status = "installed"
