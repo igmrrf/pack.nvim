@@ -167,4 +167,43 @@ describe("packui.ui", function()
       assert.is_true(text:match("%[all%]") ~= nil)
     end)
   end)
+
+  describe("disable/enable toggle", function()
+    it("disabling a not-yet-loaded plugin moves it to the Disabled tab and persists", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.toggle_disabled()
+
+      assert.is_true(state.get_plugins()["foo.nvim"].disabled)
+      assert.is_true(require("packui.persist").load()["foo.nvim"])
+
+      ui.cycle_tab() -- all -> outdated
+      ui.cycle_tab() -- outdated -> disabled
+      local disabled_buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(disabled_buf, 0, -1, false), "\n")
+      assert.is_true(text:match("foo%.nvim") ~= nil)
+    end)
+
+    it("re-enabling from the Disabled tab clears the flag", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_disabled("foo.nvim", true)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      ui.cycle_tab() -- outdated -> disabled
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.toggle_disabled()
+
+      assert.is_false(state.get_plugins()["foo.nvim"].disabled)
+      assert.is_nil(require("packui.persist").load()["foo.nvim"])
+    end)
+  end)
 end)
