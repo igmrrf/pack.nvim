@@ -135,7 +135,7 @@ When inside the dashboard (opened via `:Packui`), you can use the following keym
 *   `<Enter>` - Quick details for the plugin under the cursor.
 *   `K` - Full details (includes current commit) for the plugin under the cursor.
 *   `l` - Show git output logs for the plugin under the cursor.
-*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `packui-disabled.json` in your Neovim config directory; an already-loaded plugin needs a restart to fully unload.
+*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `packui-disabled.json` in your Neovim config directory (a plain JSON array of plugin names, e.g. `["foo.nvim", "bar.nvim"]` — safe to hand-edit); an already-loaded plugin needs a restart to fully unload.
 *   `c` - Check for outdated plugins (runs `git fetch` for every installed plugin).
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
