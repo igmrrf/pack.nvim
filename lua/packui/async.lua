@@ -154,6 +154,10 @@ function M.parse_behind_count(output)
 end
 
 function M.check_outdated(plugin)
+  -- Skip if plugin is disabled or not in an eligible status
+  if plugin.disabled or (plugin.status ~= "installed" and plugin.status ~= "loaded") then
+    return
+  end
   table.insert(queue, function(done)
     M.spawn(plugin, "git", { "fetch" }, plugin.dir, function(fetch_code)
       if fetch_code ~= 0 then
