@@ -47,15 +47,19 @@ function M.init(config)
       vim.notify("packui: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
       goto continue
     end
-    local path_type = normalized.lazy and "opt" or "start"
-    local other_path_type = normalized.lazy and "start" or "opt"
-    normalized.dir = config.install_path .. "/" .. path_type .. "/" .. normalized.name
-    local other_dir = config.install_path .. "/" .. other_path_type .. "/" .. normalized.name
-    
-    if vim.fn.isdirectory(normalized.dir) == 0 and vim.fn.isdirectory(other_dir) == 1 then
+    -- Everything lives under opt/ and is packadd'd explicitly (lazily on
+    -- trigger, or immediately in loader.init() for non-lazy plugins).
+    -- :packadd only resolves pack/*/opt/{name} - a start/ package is only
+    -- auto-loaded by Nvim's own startup scan, which runs before install_path
+    -- is ever added to 'packpath', so start/ plugins installed or configured
+    -- through packui would silently never load.
+    normalized.dir = config.install_path .. "/opt/" .. normalized.name
+    local legacy_start_dir = config.install_path .. "/start/" .. normalized.name
+
+    if vim.fn.isdirectory(normalized.dir) == 0 and vim.fn.isdirectory(legacy_start_dir) == 1 then
       local parent_dir = vim.fn.fnamemodify(normalized.dir, ":h")
       vim.fn.mkdir(parent_dir, "p")
-      vim.fn.rename(other_dir, normalized.dir)
+      vim.fn.rename(legacy_start_dir, normalized.dir)
     end
     
     if vim.fn.isdirectory(normalized.dir) == 1 then

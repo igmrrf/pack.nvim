@@ -10,6 +10,77 @@ local function packadd(name)
   return ok
 end
 
+-- Accepts: "<lhs>" | { "<lhs>", mode=... } | { "<lhs>", rhs, mode=..., desc=..., ... }
+local function normalize_key_entries(raw)
+  local entries = {}
+  local list = type(raw) == "table" and raw or { raw }
+  for _, k in ipairs(list) do
+    if type(k) == "string" then
+      table.insert(entries, { lhs = k, rhs = nil, modes = { "n" }, opts = {} })
+    else
+      local modes = k.mode or "n"
+      modes = type(modes) == "table" and modes or { modes }
+      local opts = {}
+      for key, value in pairs(k) do
+        if type(key) == "string" and key ~= "mode" then
+          opts[key] = value
+        end
+      end
+      table.insert(entries, { lhs = k[1] or k.lhs, rhs = k[2], modes = modes, opts = opts })
+    end
+  end
+  return entries
+end
+
+-- Entries with an explicit rhs are mapped directly (mirrors packui.map_keys).
+-- Bare-lhs entries only make sense on a lazy plugin: pressing the key loads
+-- the plugin then replays the keypress so the plugin's own mapping fires.
+local function setup_keys(p)
+  for _, entry in ipairs(normalize_key_entries(p.keys)) do
+    local lhs = entry.lhs
+    if not p.lazy then
+      if entry.rhs == nil then
+        vim.notify(
+          "packui: '" .. p.name .. "' keys entry '" .. lhs .. "' has no rhs and the plugin isn't lazy - nothing to bind",
+          vim.log.levels.WARN
+        )
+      else
+        for _, mode in ipairs(entry.modes) do
+          vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
+        end
+      end
+    else
+      local function trigger()
+        for _, mode in ipairs(entry.modes) do
+          pcall(vim.keymap.del, mode, lhs)
+        end
+        M.load(p.name)
+        local replay = function()
+          vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(lhs, true, true, true), "m", false)
+        end
+        if entry.rhs == nil then
+          -- rely on the plugin's own config() to have (re)defined this mapping
+          replay()
+        elseif type(entry.rhs) == "function" then
+          for _, mode in ipairs(entry.modes) do
+            vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
+          end
+          entry.rhs()
+        else
+          for _, mode in ipairs(entry.modes) do
+            vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
+          end
+          replay()
+        end
+      end
+      local trigger_opts = vim.tbl_extend("force", { desc = "packui: lazy-load " .. p.name }, entry.opts)
+      for _, mode in ipairs(entry.modes) do
+        vim.keymap.set(mode, lhs, trigger, trigger_opts)
+      end
+    end
+  end
+end
+
 function M.init(config)
   -- :packadd resolves <packpath-entry>/pack/*/opt|start/<name>, and our plugin
   -- dirs live at install_path/opt|start/<name>, so the packpath entry must be
@@ -92,32 +163,6 @@ function M.init(config)
         })
       end
 
-      if p.keys then
-        local keyspecs = {}
-        local raw = type(p.keys) == "table" and p.keys or { p.keys }
-        for _, k in ipairs(raw) do
-          if type(k) == "string" then
-            table.insert(keyspecs, { lhs = k, modes = { "n" } })
-          else
-            local modes = k.mode or "n"
-            table.insert(keyspecs, { lhs = k[1] or k.lhs, modes = type(modes) == "table" and modes or { modes } })
-          end
-        end
-        for _, spec in ipairs(keyspecs) do
-          local lhs = spec.lhs
-          local function trigger()
-            for _, mode in ipairs(spec.modes) do
-              pcall(vim.keymap.del, mode, lhs)
-            end
-            M.load(p.name)
-            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(lhs, true, true, true), "m", false)
-          end
-          for _, mode in ipairs(spec.modes) do
-            vim.keymap.set(mode, lhs, trigger, { desc = "packui: lazy-load " .. p.name })
-          end
-        end
-      end
-
     elseif not p.lazy and p.status == "installed" then
       if packadd(p.name) then
         state.update_status(p.name, "loaded")
@@ -130,6 +175,10 @@ function M.init(config)
           end)
         end
       end
+    end
+
+    if p.keys and (p.status == "installed" or p.status == "loaded") then
+      setup_keys(p)
     end
   end
 end
