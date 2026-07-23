@@ -1,3 +1,5 @@
+local persist = require("packui.persist")
+
 local M = {}
 
 M.plugins = {}
@@ -52,17 +54,22 @@ local function normalize(plugin)
     dir = "",
     status = "unknown", -- missing, installed, loaded, error
     log = {},
+    disabled = false,
+    behind = nil,
+    checked_at = nil,
   }
 end
 
 function M.init(config)
   M.plugins = {}
+  local disabled_set = persist.load()
   for _, p in ipairs(config.plugins) do
     local normalized = normalize(p)
     if not normalized then
       vim.notify("packui: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
       goto continue
     end
+    normalized.disabled = disabled_set[normalized.name] or false
     -- Everything lives under opt/ and is packadd'd explicitly (lazily on
     -- trigger, or immediately in loader.init() for non-lazy plugins).
     -- :packadd only resolves pack/*/opt/{name} - a start/ package is only
@@ -97,6 +104,22 @@ function M.update_status(name, status)
   if M.plugins[name] then
     M.plugins[name].status = status
   end
+end
+
+function M.set_disabled(name, disabled)
+  if not M.plugins[name] then
+    return
+  end
+  M.plugins[name].disabled = disabled
+  persist.set_disabled(name, disabled)
+end
+
+function M.set_behind(name, behind)
+  if not M.plugins[name] then
+    return
+  end
+  M.plugins[name].behind = behind
+  M.plugins[name].checked_at = os.time()
 end
 
 return M
