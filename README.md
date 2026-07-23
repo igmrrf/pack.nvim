@@ -43,14 +43,23 @@ require("packui").setup({
     -- Example: Auto-loaded dependency
     { "nvim-lua/plenary.nvim" },
 
-    -- Example: Lazy-loaded via Command
+    -- Example: opts shorthand - calls require("telescope").setup(opts) for you,
+    -- no need to write your own `config` function
     { 
       "nvim-telescope/telescope.nvim", 
       lazy = true, 
       cmd = "Telescope",
-      config = function()
-        require("telescope").setup()
-      end
+      opts = {
+        defaults = { layout_strategy = "vertical" },
+      },
+    },
+
+    -- Example: `main` overrides the inferred module name when it doesn't match
+    -- the "<module>.nvim" convention (default: strip a trailing ".nvim")
+    {
+      "igmrrf/arduino_nvim",
+      main = "arduino-nvim",
+      opts = { mode = "float" },
     },
 
     -- Example: Lazy-loaded via Filetype
