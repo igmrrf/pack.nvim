@@ -1,0 +1,11 @@
+describe("test harness", function()
+  it("runs a basic assertion", function()
+    assert.equals(2, 1 + 1)
+  end)
+
+  it("can require plenary's busted helpers", function()
+    assert.is_function(describe)
+    assert.is_function(it)
+    assert.is_truthy(assert.equals)
+  end)
+end)
