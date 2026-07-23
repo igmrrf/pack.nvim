@@ -6,6 +6,7 @@ describe("test harness", function()
   it("can require plenary's busted helpers", function()
     assert.is_function(describe)
     assert.is_function(it)
+    -- assert.equals is a callable table (has __call metamethod), not a plain function
     assert.is_truthy(assert.equals)
   end)
 end)
