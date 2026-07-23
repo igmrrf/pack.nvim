@@ -257,4 +257,124 @@ describe("packui.ui", function()
       pcall(vim.keymap.del, "n", "<leader>zz")
     end)
   end)
+
+  describe("outdated tab rich display", function()
+    it("renders path/source/revision/pending-commits for a plugin with full outdated detail", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 2)
+      state.set_outdated_detail("foo.nvim", {
+        revision_before = "e068ab5",
+        revision_after = "c7c692a",
+        upstream_branch = "main",
+        pending_commits = { "c7c692a │ fix: something (#1023)", "058e83d │ fix!: other thing (#1019)" },
+      })
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("Path:") ~= nil)
+      assert.is_true(text:match("Source:") ~= nil)
+      assert.is_true(text:match("Revision before:%s+e068ab5") ~= nil)
+      assert.is_true(text:match("Revision after:%s+c7c692a %(main%)") ~= nil)
+      assert.is_true(text:match("c7c692a │ fix: something %(#1023%)") ~= nil)
+      assert.is_true(text:match("058e83d │ fix!: other thing %(#1019%)") ~= nil)
+    end)
+
+    it("falls back to a compact line when pending_commits hasn't been populated yet", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 3)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("foo%.nvim") ~= nil)
+      assert.is_true(text:match("3 behind") ~= nil)
+      assert.is_nil(text:match("Pending updates:"))
+    end)
+
+    it("maps every line of a plugin's rich block to that plugin for u/K/Enter", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 1)
+      state.set_outdated_detail("foo.nvim", {
+        revision_before = "aaa1111",
+        revision_after = "bbb2222",
+        upstream_branch = "main",
+        pending_commits = { "bbb2222 │ fix: x" },
+      })
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "Pending updates:")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+      ui.show_details()
+      local popup_buf = vim.api.nvim_get_current_buf()
+      local popup_text = table.concat(vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false), "\n")
+      assert.is_true(popup_text:match("foo%.nvim") ~= nil)
+    end)
+  end)
+
+  describe("outdated updates", function()
+    it("update_one calls async.update_plugin for the cursor plugin while on the Outdated tab", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 3)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      local async = require("packui.async")
+      local called_with = nil
+      local original = async.update_plugin
+      async.update_plugin = function(p) called_with = p.name end
+
+      ui.update_one()
+
+      async.update_plugin = original
+      assert.equals("foo.nvim", called_with)
+    end)
+
+    it("update_one is a no-op outside the Outdated tab", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 3)
+      ui.open(config) -- defaults to the All tab
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      local async = require("packui.async")
+      local called = false
+      local original = async.update_plugin
+      async.update_plugin = function() called = true end
+
+      ui.update_one()
+
+      async.update_plugin = original
+      assert.is_false(called)
+    end)
+
+    it("update_all_outdated updates every plugin with behind > 0", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 3)
+      state.set_behind("bar.nvim", 0)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+
+      local async = require("packui.async")
+      local updated = {}
+      local original = async.update_plugin
+      async.update_plugin = function(p) table.insert(updated, p.name) end
+
+      ui.update_all_outdated()
+
+      async.update_plugin = original
+      assert.same({ "foo.nvim" }, updated)
+    end)
+  end)
 end)

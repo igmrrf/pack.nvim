@@ -67,4 +67,26 @@ describe("packui.state", function()
     assert.is_true(ok)
     assert.is_nil(state.get_plugins()["nonexistent.nvim"])
   end)
+
+  it("set_outdated_detail stores revision/branch/commit fields together", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    state.set_outdated_detail("foo.nvim", {
+      revision_before = "abc123",
+      revision_after = "def456",
+      upstream_branch = "main",
+      pending_commits = { "def456 │ fix: something" },
+    })
+    local p = state.get_plugins()["foo.nvim"]
+    assert.equals("abc123", p.revision_before)
+    assert.equals("def456", p.revision_after)
+    assert.equals("main", p.upstream_branch)
+    assert.same({ "def456 │ fix: something" }, p.pending_commits)
+  end)
+
+  it("set_outdated_detail no-ops for an unknown plugin name", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local ok = pcall(state.set_outdated_detail, "nonexistent.nvim", { revision_before = "x" })
+    assert.is_true(ok)
+    assert.is_nil(state.get_plugins()["nonexistent.nvim"])
+  end)
 end)

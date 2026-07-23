@@ -57,6 +57,10 @@ local function normalize(plugin)
     disabled = false,
     behind = nil,
     checked_at = nil,
+    revision_before = nil,
+    revision_after = nil,
+    upstream_branch = nil,
+    pending_commits = nil,
   }
 end
 
@@ -120,6 +124,17 @@ function M.set_behind(name, behind)
   end
   M.plugins[name].behind = behind
   M.plugins[name].checked_at = os.time()
+end
+
+function M.set_outdated_detail(name, detail)
+  if not M.plugins[name] then
+    return
+  end
+  local p = M.plugins[name]
+  p.revision_before = detail.revision_before
+  p.revision_after = detail.revision_after
+  p.upstream_branch = detail.upstream_branch
+  p.pending_commits = detail.pending_commits
 end
 
 return M
