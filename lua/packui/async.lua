@@ -130,6 +130,8 @@ function M.update_plugin(plugin)
     M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
       if code == 0 then
         state.update_status(plugin.name, was_loaded and "loaded" or "installed")
+        state.set_behind(plugin.name, 0)
+        state.set_outdated_detail(plugin.name, {})
       else
         state.update_status(plugin.name, "error")
       end
@@ -153,6 +155,39 @@ function M.parse_behind_count(output)
   return tonumber(digits)
 end
 
+function M.parse_revision_pair(output)
+  if type(output) ~= "string" then
+    return nil, nil
+  end
+  local lines = {}
+  for line in output:gmatch("([^\r\n]+)") do
+    table.insert(lines, line)
+  end
+  return lines[1], lines[2]
+end
+
+function M.parse_upstream_branch_name(output)
+  if type(output) ~= "string" then
+    return nil
+  end
+  local trimmed = vim.trim(output)
+  if trimmed == "" then
+    return nil
+  end
+  return trimmed:match("^[^/]-/(.+)$") or trimmed
+end
+
+function M.parse_pending_commits(output)
+  if type(output) ~= "string" or output == "" then
+    return {}
+  end
+  local commits = {}
+  for line in output:gmatch("([^\r\n]+)") do
+    table.insert(commits, line)
+  end
+  return commits
+end
+
 function M.check_outdated(plugin)
   -- Skip if plugin is disabled or not in an eligible status
   if plugin.disabled or (plugin.status ~= "installed" and plugin.status ~= "loaded") then
@@ -165,16 +200,55 @@ function M.check_outdated(plugin)
         return
       end
       M.spawn(plugin, "git", { "rev-list", "--count", "HEAD..@{upstream}" }, plugin.dir, function(count_code, output)
-        if count_code == 0 then
-          local behind = M.parse_behind_count(output)
-          if behind then
-            state.set_behind(plugin.name, behind)
-            if package.loaded["packui.ui"] then
-              require("packui.ui").update()
-            end
-          end
+        if count_code ~= 0 then
+          done()
+          return
         end
-        done()
+        local behind = M.parse_behind_count(output)
+        if not behind then
+          done()
+          return
+        end
+        state.set_behind(plugin.name, behind)
+        if package.loaded["packui.ui"] then
+          require("packui.ui").update()
+        end
+
+        if behind == 0 then
+          done()
+          return
+        end
+
+        M.spawn(plugin, "git", { "rev-parse", "--short", "HEAD", "@{upstream}" }, plugin.dir, function(rev_code, rev_output)
+          local revision_before, revision_after
+          if rev_code == 0 then
+            revision_before, revision_after = M.parse_revision_pair(rev_output)
+          end
+
+          M.spawn(plugin, "git", { "rev-parse", "--abbrev-ref", "@{upstream}" }, plugin.dir, function(branch_code, branch_output)
+            local upstream_branch
+            if branch_code == 0 then
+              upstream_branch = M.parse_upstream_branch_name(branch_output)
+            end
+
+            M.spawn(plugin, "git", { "log", "--format=%h │ %s", "HEAD..@{upstream}" }, plugin.dir, function(log_code, log_output)
+              local pending_commits = {}
+              if log_code == 0 then
+                pending_commits = M.parse_pending_commits(log_output)
+              end
+              state.set_outdated_detail(plugin.name, {
+                revision_before = revision_before,
+                revision_after = revision_after,
+                upstream_branch = upstream_branch,
+                pending_commits = pending_commits,
+              })
+              if package.loaded["packui.ui"] then
+                require("packui.ui").update()
+              end
+              done()
+            end)
+          end)
+        end)
       end)
     end)
   end)
@@ -191,7 +265,9 @@ end
 
 function M.sync(config)
   for _, p in pairs(state.get_plugins()) do
-    if p.status == "installing" or p.status == "updating" then
+    if p.disabled then
+      -- skip
+    elseif p.status == "installing" or p.status == "updating" then
       -- Skip already active jobs
     else
       p.log = {}

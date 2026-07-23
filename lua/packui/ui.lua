@@ -178,6 +178,28 @@ function M.toggle_disabled()
   M.update()
 end
 
+function M.update_one()
+  if current_tab ~= "outdated" then
+    return
+  end
+  local p = plugin_at_cursor()
+  if not p then
+    return
+  end
+  require("packui.async").update_plugin(p)
+end
+
+function M.update_all_outdated()
+  if current_tab ~= "outdated" then
+    return
+  end
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and p.behind and p.behind > 0 then
+      require("packui.async").update_plugin(p)
+    end
+  end
+end
+
 function M.open(config)
   config_ref = config
   if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -218,8 +240,12 @@ function M.open(config)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "<Tab>", "<Cmd>lua require('packui.ui').cycle_tab()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "x", "<Cmd>lua require('packui.ui').toggle_disabled()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "c", "<Cmd>lua require('packui.async').check_all_outdated()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "u", "<Cmd>lua require('packui.ui').update_one()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "U", "<Cmd>lua require('packui.ui').update_all_outdated()<CR>", opts)
 
   M.update()
+  require("packui.async").check_all_outdated()
 end
 
 function M.show_log()
@@ -282,6 +308,31 @@ local function render_all_tab(lines, highlights)
   render_group("Errors", groups.error, config_ref.ui.icons.error, "DiagnosticError")
 end
 
+local function outdated_plugin_lines(p)
+  if not p.pending_commits or #p.pending_commits == 0 then
+    return {
+      string.format("  ## %s — %d behind (press c to re-check)", p.name, p.behind),
+      "",
+    }
+  end
+
+  local branch_suffix = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""
+  local lines = {
+    "  ## " .. p.name,
+    "  Path:            " .. p.dir,
+    "  Source:          " .. p.url,
+    "  Revision before: " .. (p.revision_before or "?"),
+    "  Revision after:  " .. (p.revision_after or "?") .. branch_suffix,
+    "",
+    "  Pending updates:",
+  }
+  for _, commit in ipairs(p.pending_commits) do
+    table.insert(lines, "  > " .. commit)
+  end
+  table.insert(lines, "")
+  return lines
+end
+
 local function render_outdated_tab(lines, highlights)
   local outdated = {}
   for _, p in pairs(state.get_plugins()) do
@@ -298,9 +349,15 @@ local function render_outdated_tab(lines, highlights)
 
   table.insert(lines, "  Outdated (" .. #outdated .. ")")
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
+  table.insert(lines, "")
+
   for _, p in ipairs(outdated) do
-    table.insert(lines, string.format("    %s %d behind", p.name, p.behind))
-    plugin_map[#lines] = p
+    local header_line = #lines
+    for _, line in ipairs(outdated_plugin_lines(p)) do
+      table.insert(lines, line)
+      plugin_map[#lines] = p
+    end
+    table.insert(highlights, { line = header_line, col_start = 2, col_end = -1, hl = "Title" })
   end
 end
 
