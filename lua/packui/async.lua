@@ -33,8 +33,10 @@ end
 function M.spawn(plugin, cmd, args, cwd, on_exit)
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
-  
+
   append_log(plugin, "$ " .. cmd .. " " .. table.concat(args, " "))
+
+  local captured_stdout = {}
 
   local handle
   handle = vim.uv.spawn(cmd, {
@@ -48,7 +50,7 @@ function M.spawn(plugin, cmd, args, cwd, on_exit)
     stderr:close()
     handle:close()
     vim.schedule(function()
-      if on_exit then on_exit(code) end
+      if on_exit then on_exit(code, table.concat(captured_stdout, "\n")) end
     end)
   end)
 
@@ -57,27 +59,32 @@ function M.spawn(plugin, cmd, args, cwd, on_exit)
     stderr:close()
     append_log(plugin, "Failed to spawn " .. cmd)
     vim.schedule(function()
-      if on_exit then on_exit(-1) end
+      if on_exit then on_exit(-1, "") end
     end)
     return
   end
 
-  local function on_read(err, data)
-    if data then
-      vim.schedule(function()
-        for line in data:gmatch("([^\n]+)") do
-          -- collapse carriage-return progress updates (e.g. git clone %) to the last segment
-          local last = line:match("([^\r]*)$")
-          if last ~= "" then
-            append_log(plugin, last)
+  local function make_on_read(is_stdout)
+    return function(err, data)
+      if data then
+        vim.schedule(function()
+          for line in data:gmatch("([^\n]+)") do
+            -- collapse carriage-return progress updates (e.g. git clone %) to the last segment
+            local last = line:match("([^\r]*)$")
+            if last ~= "" then
+              append_log(plugin, last)
+              if is_stdout then
+                table.insert(captured_stdout, last)
+              end
+            end
           end
-        end
-      end)
+        end)
+      end
     end
   end
-  
-  stdout:read_start(on_read)
-  stderr:read_start(on_read)
+
+  stdout:read_start(make_on_read(true))
+  stderr:read_start(make_on_read(false))
 end
 
 function M.install(plugin)
@@ -133,6 +140,49 @@ function M.update_plugin(plugin)
     end)
   end)
   process_queue()
+end
+
+function M.parse_behind_count(output)
+  if type(output) ~= "string" then
+    return nil
+  end
+  local digits = output:match("^%s*(%d+)%s*$")
+  if not digits then
+    return nil
+  end
+  return tonumber(digits)
+end
+
+function M.check_outdated(plugin)
+  table.insert(queue, function(done)
+    M.spawn(plugin, "git", { "fetch" }, plugin.dir, function(fetch_code)
+      if fetch_code ~= 0 then
+        done()
+        return
+      end
+      M.spawn(plugin, "git", { "rev-list", "--count", "HEAD..@{upstream}" }, plugin.dir, function(count_code, output)
+        if count_code == 0 then
+          local behind = M.parse_behind_count(output)
+          if behind then
+            state.set_behind(plugin.name, behind)
+            if package.loaded["packui.ui"] then
+              require("packui.ui").update()
+            end
+          end
+        end
+        done()
+      end)
+    end)
+  end)
+  process_queue()
+end
+
+function M.check_all_outdated()
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and (p.status == "installed" or p.status == "loaded") then
+      M.check_outdated(p)
+    end
+  end
 end
 
 function M.sync(config)
