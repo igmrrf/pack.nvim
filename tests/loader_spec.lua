@@ -55,6 +55,20 @@ describe("packui.loader triggers", function()
     assert.is_true(ok)
   end)
 
+  it("enable() restores keymaps stripped by remove_triggers for an already-loaded plugin", function()
+    local p = make_plugin({ lazy = false, status = "loaded", keys = { { "<leader>ff", "<cmd>echo 'ff'<CR>" } } })
+    loader.setup_keys(p)
+    assert.is_true(vim.fn.maparg("<leader>ff", "n") ~= "")
+
+    loader.remove_triggers(p)
+    assert.is_true(vim.fn.maparg("<leader>ff", "n") == "")
+
+    loader.enable(p)
+    assert.is_true(vim.fn.maparg("<leader>ff", "n") ~= "")
+
+    pcall(vim.keymap.del, "n", "<leader>ff")
+  end)
+
   it("remove_triggers respects command ownership after collision", function()
     -- Regression test: Plugin A registers :Foo, Plugin B later overwrites it.
     -- Removing A should NOT delete :Foo because B now owns it.
