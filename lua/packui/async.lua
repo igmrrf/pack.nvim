@@ -113,15 +113,16 @@ function M.install(plugin)
 end
 
 function M.update_plugin(plugin)
+  local was_loaded = plugin.status == "loaded"
   table.insert(queue, function(done)
     state.update_status(plugin.name, "updating")
     if package.loaded["packui.ui"] then
       require("packui.ui").update()
     end
-    
+
     M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
       if code == 0 then
-        state.update_status(plugin.name, "installed")
+        state.update_status(plugin.name, was_loaded and "loaded" or "installed")
       else
         state.update_status(plugin.name, "error")
       end
