@@ -8,6 +8,29 @@ local config_ref = nil
 local plugin_map = {}
 local ns_id = vim.api.nvim_create_namespace("packui")
 
+local current_tab = "all"
+local TAB_ORDER = { "all", "outdated", "disabled" }
+
+local function next_tab(tab)
+  for i, t in ipairs(TAB_ORDER) do
+    if t == tab then
+      return TAB_ORDER[(i % #TAB_ORDER) + 1]
+    end
+  end
+  return TAB_ORDER[1]
+end
+
+local FOOTER_BY_TAB = {
+  all = "  [S]ync  [x]disable  [Tab]next tab  [?]help  [q]uit",
+  outdated = "  [u]pdate one  [U]pdate all  [c]heck  [Tab]next tab  [?]help  [q]uit",
+  disabled = "  [x]enable  [Tab]next tab  [?]help  [q]uit",
+}
+
+function M.cycle_tab()
+  current_tab = next_tab(current_tab)
+  M.update()
+end
+
 local KEYMAP_HELP = {
   { key = "q", scope = "all", desc = "close" },
   { key = "?", scope = "all", desc = "show this help" },
@@ -137,6 +160,8 @@ function M.open(config)
     return
   end
   
+  current_tab = "all"
+
   buf_id = vim.api.nvim_create_buf(false, true)
   vim.bo[buf_id].bufhidden = "wipe"
   vim.bo[buf_id].buftype = "nofile"
@@ -166,6 +191,7 @@ function M.open(config)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_details()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "K", "<Cmd>lua require('packui.ui').show_full_details()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "<Tab>", "<Cmd>lua require('packui.ui').cycle_tab()<CR>", opts)
 
   M.update()
 end
@@ -180,25 +206,9 @@ function M.show_log()
   vim.bo[buf].filetype = "packui_log"
 end
 
-function M.update()
-  if not buf_id or not vim.api.nvim_buf_is_valid(buf_id) then
-    return
-  end
-  
-  local cursor
-  if win_id and vim.api.nvim_win_is_valid(win_id) then
-    cursor = vim.api.nvim_win_get_cursor(win_id)
-  end
-  
-  local lines = {}
-  plugin_map = {}
-  
-  table.insert(lines, "  Pack UI Dashboard")
-  table.insert(lines, "  =================")
-  table.insert(lines, "")
-  
+local function render_all_tab(lines, highlights)
   local plugins = state.get_plugins()
-  
+
   local groups = {
     loaded = {},
     installed = {},
@@ -207,12 +217,14 @@ function M.update()
     updating = {},
     error = {}
   }
-  
+
   for _, p in pairs(plugins) do
-    if groups[p.status] then
-      table.insert(groups[p.status], p)
-    else
-      table.insert(groups.installed, p)
+    if not p.disabled then
+      if groups[p.status] then
+        table.insert(groups[p.status], p)
+      else
+        table.insert(groups.installed, p)
+      end
     end
   end
 
@@ -220,7 +232,6 @@ function M.update()
     table.sort(list, function(a, b) return a.name < b.name end)
   end
 
-  local highlights = {}
   local function render_group(name, list, icon, hl_group)
     if #list > 0 then
       table.insert(lines, "  " .. name .. " (" .. #list .. ")")
@@ -236,28 +247,99 @@ function M.update()
       table.insert(lines, "")
     end
   end
-  
+
   render_group("Missing", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticError")
   render_group("Installing", groups.installing, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Updating", groups.updating, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Loaded", groups.loaded, config_ref.ui.icons.loaded, "DiagnosticOk")
   render_group("Installed (Not Loaded)", groups.installed, config_ref.ui.icons.loaded, "DiagnosticInfo")
   render_group("Errors", groups.error, config_ref.ui.icons.error, "DiagnosticError")
-  
-  table.insert(lines, "  Press [S] to Sync, [Enter] for details, [l] for logs, [q] to quit")
+end
+
+local function render_outdated_tab(lines, highlights)
+  local outdated = {}
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and p.behind and p.behind > 0 then
+      table.insert(outdated, p)
+    end
+  end
+  table.sort(outdated, function(a, b) return a.name < b.name end)
+
+  if #outdated == 0 then
+    table.insert(lines, "  No outdated plugins (press c to check)")
+    return
+  end
+
+  table.insert(lines, "  Outdated (" .. #outdated .. ")")
+  table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
+  for _, p in ipairs(outdated) do
+    table.insert(lines, string.format("    %s %d behind", p.name, p.behind))
+    plugin_map[#lines] = p
+  end
+end
+
+local function render_disabled_tab(lines, highlights)
+  local disabled = {}
+  for _, p in pairs(state.get_plugins()) do
+    if p.disabled then
+      table.insert(disabled, p)
+    end
+  end
+  table.sort(disabled, function(a, b) return a.name < b.name end)
+
+  if #disabled == 0 then
+    table.insert(lines, "  No disabled plugins")
+    return
+  end
+
+  table.insert(lines, "  Disabled (" .. #disabled .. ")")
+  table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
+  for _, p in ipairs(disabled) do
+    table.insert(lines, string.format("    %s (%s)", p.name, p.status))
+    plugin_map[#lines] = p
+  end
+end
+
+function M.update()
+  if not buf_id or not vim.api.nvim_buf_is_valid(buf_id) then
+    return
+  end
+
+  local cursor
+  if win_id and vim.api.nvim_win_is_valid(win_id) then
+    cursor = vim.api.nvim_win_get_cursor(win_id)
+  end
+
+  local lines = {}
+  local highlights = {}
+  plugin_map = {}
+
+  table.insert(lines, "  Pack UI Dashboard [" .. current_tab .. "]")
+  table.insert(lines, "  =================")
+  table.insert(lines, "")
+
+  if current_tab == "all" then
+    render_all_tab(lines, highlights)
+  elseif current_tab == "outdated" then
+    render_outdated_tab(lines, highlights)
+  else
+    render_disabled_tab(lines, highlights)
+  end
+
+  table.insert(lines, FOOTER_BY_TAB[current_tab] or FOOTER_BY_TAB.all)
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Comment" })
-  
+
   vim.bo[buf_id].modifiable = true
   vim.api.nvim_buf_set_lines(buf_id, 0, -1, false, lines)
   vim.bo[buf_id].modifiable = false
-  
+
   vim.api.nvim_buf_clear_namespace(buf_id, ns_id, 0, -1)
   table.insert(highlights, { line = 0, col_start = 2, col_end = -1, hl = "Title" })
   table.insert(highlights, { line = 1, col_start = 2, col_end = -1, hl = "Title" })
   for _, h in ipairs(highlights) do
     vim.api.nvim_buf_add_highlight(buf_id, ns_id, h.hl, h.line, h.col_start, h.col_end)
   end
-  
+
   if cursor and win_id and vim.api.nvim_win_is_valid(win_id) then
     if cursor[1] > #lines then
       cursor[1] = #lines
