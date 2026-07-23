@@ -100,11 +100,21 @@ function M.install(plugin)
     M.spawn(plugin, "git", { "clone", "--depth", "1", plugin.url, plugin.dir }, nil, function(code)
       if code == 0 then
         state.update_status(plugin.name, "installed")
-        
-        -- Automatically load the plugin if it's not lazy-loaded
+
         if not plugin.lazy then
+          -- Automatically load the plugin if it's not lazy-loaded
           vim.schedule(function()
             require("packui.loader").load(plugin.name)
+          end)
+        else
+          -- loader.init() only wires up cmd/event/ft/keys triggers for
+          -- plugins that were already on disk at startup. A lazy plugin
+          -- installed mid-session via :PackuiSync would otherwise sit at
+          -- status "installed" with no trigger ever registered - its
+          -- cmd/event/ft/keys would silently do nothing until the next
+          -- Neovim restart re-runs loader.init(). Wire it up now instead.
+          vim.schedule(function()
+            require("packui.loader").setup_triggers(plugin)
           end)
         end
       else
