@@ -23,7 +23,7 @@ function M.load()
   end
 
   local decode_ok, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-  if not decode_ok or type(decoded) ~= "table" then
+  if not decode_ok or type(decoded) ~= "table" or not vim.islist(decoded) then
     vim.notify("packui: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
     return {}
   end
