@@ -55,10 +55,13 @@ local function load_plugins(spec)
 end
 
 function M.setup(opts)
+  local plugins
   if opts and opts.plugins then
-    opts.plugins = load_plugins(opts.plugins)
+    plugins = load_plugins(opts.plugins)
+    opts.plugins = nil
   end
   M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  M.config.plugins = plugins or M.config.plugins
   state.init(M.config)
   loader.init(M.config)
   
