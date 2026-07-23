@@ -8,6 +8,63 @@ local config_ref = nil
 local plugin_map = {}
 local ns_id = vim.api.nvim_create_namespace("packui")
 
+local KEYMAP_HELP = {
+  { key = "q", scope = "all", desc = "close" },
+  { key = "?", scope = "all", desc = "show this help" },
+  { key = "S", scope = "all", desc = "sync all (install missing, pull updates)" },
+  { key = "Tab", scope = "all", desc = "cycle tabs: All -> Outdated -> Disabled" },
+  { key = "Enter", scope = "all", desc = "quick details for plugin under cursor" },
+  { key = "K", scope = "all", desc = "full details (commit info) for plugin under cursor" },
+  { key = "l", scope = "all", desc = "view install/update logs for plugin under cursor" },
+  { key = "x", scope = "All, Disabled", desc = "toggle disable/enable for plugin under cursor" },
+  { key = "c", scope = "all", desc = "check for outdated plugins (git fetch)" },
+  { key = "u", scope = "Outdated", desc = "update plugin under cursor" },
+  { key = "U", scope = "Outdated", desc = "update all outdated plugins" },
+  { key = "/", scope = "all", desc = "native vim search" },
+}
+
+local function open_popup(lines, opts)
+  opts = opts or {}
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].swapfile = false
+
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  local width = math.floor(vim.o.columns * (opts.width_pct or 0.6))
+  local height = math.min(#lines + 2, math.floor(vim.o.lines * (opts.height_pct or 0.6)))
+  local row = math.floor((vim.o.lines - height) / 2)
+  local col = math.floor((vim.o.columns - width) / 2)
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = row,
+    col = col,
+    border = "rounded",
+    style = "minimal"
+  })
+  vim.wo[win].wrap = opts.wrap or false
+
+  local keymap_opts = { noremap = true, silent = true }
+  for _, key in ipairs(opts.close_keys or { "q" }) do
+    vim.api.nvim_buf_set_keymap(buf, "n", key, "<Cmd>close<CR>", keymap_opts)
+  end
+
+  return buf, win
+end
+
+function M.show_help()
+  local lines = { "  Packui Keymaps", "  ===============", "" }
+  for _, entry in ipairs(KEYMAP_HELP) do
+    table.insert(lines, string.format("  %-7s %-14s %s", entry.key, entry.scope, entry.desc))
+  end
+  open_popup(lines, { close_keys = { "q", "?", "<Esc>" } })
+end
+
 function M.open(config)
   config_ref = config
   if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -39,6 +96,7 @@ function M.open(config)
   
   local opts = { noremap = true, silent = true }
   vim.api.nvim_buf_set_keymap(buf_id, "n", "q", "<Cmd>close<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "?", "<Cmd>lua require('packui.ui').show_help()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackuiSync<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
   
