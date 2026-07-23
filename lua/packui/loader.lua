@@ -181,23 +181,14 @@ function M.remove_triggers(p)
   end
 end
 
-M.setup_keys = setup_keys
-
 function M.enable(p)
+  if p.status == "loaded" then
+    return
+  end
   if p.lazy then
-    if p.status ~= "loaded" then
-      M.setup_triggers(p)
-    elseif p.keys then
-      M.setup_keys(p)
-    end
+    M.setup_triggers(p)
   else
-    if p.status == "loaded" then
-      if p.keys then
-        M.setup_keys(p)
-      end
-    else
-      M.load(p.name)
-    end
+    M.load(p.name)
   end
 end
 

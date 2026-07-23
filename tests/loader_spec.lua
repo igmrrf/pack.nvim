@@ -55,15 +55,16 @@ describe("packui.loader triggers", function()
     assert.is_true(ok)
   end)
 
-  it("enable() restores keymaps stripped by remove_triggers for an already-loaded plugin", function()
+  it("enable() is a safe no-op for an already-loaded plugin (nothing was torn down for it)", function()
     local p = make_plugin({ lazy = false, status = "loaded", keys = { { "<leader>ff", "<cmd>echo 'ff'<CR>" } } })
-    loader.setup_keys(p)
+    vim.keymap.set("n", "<leader>ff", "<cmd>echo 'ff'<CR>")
     assert.is_true(vim.fn.maparg("<leader>ff", "n") ~= "")
 
-    loader.remove_triggers(p)
-    assert.is_true(vim.fn.maparg("<leader>ff", "n") == "")
-
-    loader.enable(p)
+    local ok = pcall(loader.enable, p)
+    assert.is_true(ok)
+    -- state/keymap untouched: enable() must not attempt to restore or
+    -- otherwise modify an already-loaded plugin's live keymaps.
+    assert.equals("loaded", p.status)
     assert.is_true(vim.fn.maparg("<leader>ff", "n") ~= "")
 
     pcall(vim.keymap.del, "n", "<leader>ff")
