@@ -1597,22 +1597,403 @@ git commit -m "feat: add disable/enable toggle (x) to dashboard"
 
 ---
 
-### Task 10: `ui.lua` — outdated re-check (`c`) and update keymaps (`u`/`U`)
+### Task 10: outdated re-check (`c`), update keymaps (`u`/`U`), and rich per-plugin commit display
+
+**Revised scope (user-requested mid-plan):** the Outdated tab must render each plugin the way Neovim's own built-in `vim.pack.update()` confirmation UI does — path, source, revision before/after, and the actual list of pending commits — not a single "N behind" line. This task now touches `state.lua` and `async.lua` in addition to `ui.lua`. It also fixes a gap found during Task 9's review: `async.lua`'s `M.sync()` doesn't skip `disabled` plugins, contradicting the design doc's "excluded from sync" guarantee.
 
 **Files:**
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/packui/state.lua`
 - Modify: `lua/packui/async.lua`
-- Test: `tests/ui_spec.lua` (append)
+- Modify: `lua/packui/ui.lua`
+- Test: `tests/state_spec.lua` (append), `tests/async_spec.lua` (append), `tests/ui_spec.lua` (append)
 
 **Interfaces:**
-- Consumes: `async.check_all_outdated()` (Task 4), `async.update_plugin(plugin)` (existing).
-- Produces: `M.update_one()` (bound to `u`), `M.update_all_outdated()` (bound to `U`), both Outdated-tab-scoped. `c` keymap wired to `async.check_all_outdated()`. `M.open` now also triggers a background outdated check. `async.update_plugin` resets `behind` to 0 on a successful pull.
+- Consumes: `async.check_all_outdated()` (Task 4), `async.update_plugin(plugin)` (existing), `state.set_behind` (Task 3).
+- Produces:
+  - `state.set_outdated_detail(name, detail)` — `detail` is `{revision_before, revision_after, upstream_branch, pending_commits}` (all optional/nil-able); sets all four plugin fields at once, no-ops on unknown name (same guarantee as `set_behind`).
+  - `async.parse_revision_pair(output) -> before, after` — pure function, splits two-line `git rev-parse` output.
+  - `async.parse_upstream_branch_name(output) -> name|nil` — pure function, strips the remote prefix from `origin/main` → `main`.
+  - `async.parse_pending_commits(output) -> {line, ...}` — pure function, splits `git log --format=%h │ %s` output into a list.
+  - `M.update_one()` (bound to `u`), `M.update_all_outdated()` (bound to `U`), both Outdated-tab-scoped. `c` keymap wired to `async.check_all_outdated()`. `M.open` now also triggers a background outdated check.
+  - `async.update_plugin` resets `behind` to 0 and clears outdated-detail fields on a successful pull.
+  - `async.sync` skips `p.disabled` plugins entirely.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing `state_spec.lua` test**
+
+Append to `tests/state_spec.lua`:
+
+```lua
+  it("set_outdated_detail stores revision/branch/commit fields together", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    state.set_outdated_detail("foo.nvim", {
+      revision_before = "abc123",
+      revision_after = "def456",
+      upstream_branch = "main",
+      pending_commits = { "def456 │ fix: something" },
+    })
+    local p = state.get_plugins()["foo.nvim"]
+    assert.equals("abc123", p.revision_before)
+    assert.equals("def456", p.revision_after)
+    assert.equals("main", p.upstream_branch)
+    assert.same({ "def456 │ fix: something" }, p.pending_commits)
+  end)
+
+  it("set_outdated_detail no-ops for an unknown plugin name", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local ok = pcall(state.set_outdated_detail, "nonexistent.nvim", { revision_before = "x" })
+    assert.is_true(ok)
+    assert.is_nil(state.get_plugins()["nonexistent.nvim"])
+  end)
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `make test`
+Expected: FAIL — `attempt to call field 'set_outdated_detail' (a nil value)`.
+
+- [ ] **Step 3: Modify `state.lua`**
+
+Add the four new fields to `normalize()`'s returned table, alongside the existing `disabled`/`behind`/`checked_at` lines:
+
+```lua
+    disabled = false,
+    behind = nil,
+    checked_at = nil,
+    revision_before = nil,
+    revision_after = nil,
+    upstream_branch = nil,
+    pending_commits = nil,
+```
+
+Add the new mutator after `M.set_behind`:
+
+```lua
+function M.set_outdated_detail(name, detail)
+  if not M.plugins[name] then
+    return
+  end
+  local p = M.plugins[name]
+  p.revision_before = detail.revision_before
+  p.revision_after = detail.revision_after
+  p.upstream_branch = detail.upstream_branch
+  p.pending_commits = detail.pending_commits
+end
+```
+
+- [ ] **Step 4: Run the `state_spec.lua` tests to verify they pass**
+
+Run: `make test`
+Expected: the two new `state_spec.lua` tests pass; full suite still green.
+
+- [ ] **Step 5: Write the failing `async_spec.lua` tests**
+
+Append to `tests/async_spec.lua`:
+
+```lua
+describe("packui.async.parse_revision_pair", function()
+  it("splits two-line rev-parse output", function()
+    local before, after = async.parse_revision_pair("abc123\ndef456\n")
+    assert.equals("abc123", before)
+    assert.equals("def456", after)
+  end)
+
+  it("returns nils for empty output", function()
+    local before, after = async.parse_revision_pair("")
+    assert.is_nil(before)
+    assert.is_nil(after)
+  end)
+
+  it("returns nils for non-string input", function()
+    local before, after = async.parse_revision_pair(nil)
+    assert.is_nil(before)
+    assert.is_nil(after)
+  end)
+end)
+
+describe("packui.async.parse_upstream_branch_name", function()
+  it("strips a single remote-name prefix", function()
+    assert.equals("main", async.parse_upstream_branch_name("origin/main\n"))
+  end)
+
+  it("only strips the first segment for a branch name containing slashes", function()
+    assert.equals("feature/foo", async.parse_upstream_branch_name("origin/feature/foo"))
+  end)
+
+  it("returns the trimmed input when there is no remote prefix", function()
+    assert.equals("main", async.parse_upstream_branch_name("main"))
+  end)
+
+  it("returns nil for empty or non-string input", function()
+    assert.is_nil(async.parse_upstream_branch_name(""))
+    assert.is_nil(async.parse_upstream_branch_name(nil))
+  end)
+end)
+
+describe("packui.async.parse_pending_commits", function()
+  it("splits multi-line git log output into a list", function()
+    local commits = async.parse_pending_commits("abc123 │ fix: x\ndef456 │ feat: y")
+    assert.same({ "abc123 │ fix: x", "def456 │ feat: y" }, commits)
+  end)
+
+  it("returns an empty list for empty or non-string output", function()
+    assert.same({}, async.parse_pending_commits(""))
+    assert.same({}, async.parse_pending_commits(nil))
+  end)
+end)
+
+describe("packui.async.sync", function()
+  it("skips disabled plugins entirely", function()
+    local state = require("packui.state")
+    local persist = require("packui.persist")
+    local tmp_path = vim.fn.tempname() .. "-disabled.json"
+    persist._set_path_for_testing(tmp_path)
+
+    state.init({ install_path = vim.fn.tempname() .. "-install", plugins = { "user/foo.nvim" } })
+    state.set_disabled("foo.nvim", true)
+
+    local install_called = false
+    local original_install = async.install
+    async.install = function() install_called = true end
+
+    async.sync({})
+
+    async.install = original_install
+    assert.is_false(install_called)
+
+    if vim.fn.filereadable(tmp_path) == 1 then
+      vim.fn.delete(tmp_path)
+    end
+    persist._set_path_for_testing(nil)
+  end)
+end)
+```
+
+- [ ] **Step 6: Run the tests to verify they fail**
+
+Run: `make test`
+Expected: FAIL — `attempt to call field 'parse_revision_pair' (a nil value)` (and similarly for the other two new functions); the `sync` test fails because `install_called` is `true` (disabled plugin not skipped).
+
+- [ ] **Step 7: Modify `async.lua`**
+
+Add the three new pure functions after `M.parse_behind_count`:
+
+```lua
+function M.parse_revision_pair(output)
+  if type(output) ~= "string" then
+    return nil, nil
+  end
+  local lines = {}
+  for line in output:gmatch("([^\r\n]+)") do
+    table.insert(lines, line)
+  end
+  return lines[1], lines[2]
+end
+
+function M.parse_upstream_branch_name(output)
+  if type(output) ~= "string" then
+    return nil
+  end
+  local trimmed = vim.trim(output)
+  if trimmed == "" then
+    return nil
+  end
+  return trimmed:match("^[^/]-/(.+)$") or trimmed
+end
+
+function M.parse_pending_commits(output)
+  if type(output) ~= "string" or output == "" then
+    return {}
+  end
+  local commits = {}
+  for line in output:gmatch("([^\r\n]+)") do
+    table.insert(commits, line)
+  end
+  return commits
+end
+```
+
+Replace `M.check_outdated`'s body so that, once `behind > 0` is confirmed, it chains three more sequential spawns before calling `done()`:
+
+```lua
+function M.check_outdated(plugin)
+  -- Skip if plugin is disabled or not in an eligible status
+  if plugin.disabled or (plugin.status ~= "installed" and plugin.status ~= "loaded") then
+    return
+  end
+  table.insert(queue, function(done)
+    M.spawn(plugin, "git", { "fetch" }, plugin.dir, function(fetch_code)
+      if fetch_code ~= 0 then
+        done()
+        return
+      end
+      M.spawn(plugin, "git", { "rev-list", "--count", "HEAD..@{upstream}" }, plugin.dir, function(count_code, output)
+        if count_code ~= 0 then
+          done()
+          return
+        end
+        local behind = M.parse_behind_count(output)
+        if not behind then
+          done()
+          return
+        end
+        state.set_behind(plugin.name, behind)
+        if package.loaded["packui.ui"] then
+          require("packui.ui").update()
+        end
+
+        if behind == 0 then
+          done()
+          return
+        end
+
+        M.spawn(plugin, "git", { "rev-parse", "--short", "HEAD", "@{upstream}" }, plugin.dir, function(rev_code, rev_output)
+          local revision_before, revision_after
+          if rev_code == 0 then
+            revision_before, revision_after = M.parse_revision_pair(rev_output)
+          end
+
+          M.spawn(plugin, "git", { "rev-parse", "--abbrev-ref", "@{upstream}" }, plugin.dir, function(branch_code, branch_output)
+            local upstream_branch
+            if branch_code == 0 then
+              upstream_branch = M.parse_upstream_branch_name(branch_output)
+            end
+
+            M.spawn(plugin, "git", { "log", "--format=%h │ %s", "HEAD..@{upstream}" }, plugin.dir, function(log_code, log_output)
+              local pending_commits = {}
+              if log_code == 0 then
+                pending_commits = M.parse_pending_commits(log_output)
+              end
+              state.set_outdated_detail(plugin.name, {
+                revision_before = revision_before,
+                revision_after = revision_after,
+                upstream_branch = upstream_branch,
+                pending_commits = pending_commits,
+              })
+              if package.loaded["packui.ui"] then
+                require("packui.ui").update()
+              end
+              done()
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+  process_queue()
+end
+```
+
+In `M.update_plugin`, reset the behind-count and clear outdated-detail on a successful pull:
+
+```lua
+    M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
+      if code == 0 then
+        state.update_status(plugin.name, was_loaded and "loaded" or "installed")
+        state.set_behind(plugin.name, 0)
+        state.set_outdated_detail(plugin.name, {})
+      else
+        state.update_status(plugin.name, "error")
+      end
+      done()
+      if package.loaded["packui.ui"] then
+        require("packui.ui").update()
+      end
+    end)
+```
+
+In `M.sync`, skip disabled plugins entirely (add the check as the first branch):
+
+```lua
+function M.sync(config)
+  for _, p in pairs(state.get_plugins()) do
+    if p.disabled then
+      -- skip
+    elseif p.status == "installing" or p.status == "updating" then
+      -- Skip already active jobs
+    else
+      p.log = {}
+      if p.status == "missing" then
+        M.install(p)
+      elseif p.status == "installed" or p.status == "loaded" or p.status == "error" then
+        if vim.fn.isdirectory(p.dir) == 1 then
+          M.update_plugin(p)
+        else
+          M.install(p)
+        end
+      end
+    end
+  end
+end
+```
+
+- [ ] **Step 8: Run the tests to verify they pass**
+
+Run: `make test`
+Expected: all new `async_spec.lua`/`state_spec.lua` tests pass, full suite green.
+
+- [ ] **Step 9: Write the failing `ui_spec.lua` tests**
 
 Append to `tests/ui_spec.lua`:
 
 ```lua
+  describe("outdated tab rich display", function()
+    it("renders path/source/revision/pending-commits for a plugin with full outdated detail", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 2)
+      state.set_outdated_detail("foo.nvim", {
+        revision_before = "e068ab5",
+        revision_after = "c7c692a",
+        upstream_branch = "main",
+        pending_commits = { "c7c692a │ fix: something (#1023)", "058e83d │ fix!: other thing (#1019)" },
+      })
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("Path:") ~= nil)
+      assert.is_true(text:match("Source:") ~= nil)
+      assert.is_true(text:match("Revision before:%s+e068ab5") ~= nil)
+      assert.is_true(text:match("Revision after:%s+c7c692a %(main%)") ~= nil)
+      assert.is_true(text:match("c7c692a │ fix: something %(#1023%)") ~= nil)
+      assert.is_true(text:match("058e83d │ fix!: other thing %(#1019%)") ~= nil)
+    end)
+
+    it("falls back to a compact line when pending_commits hasn't been populated yet", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 3)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("foo%.nvim") ~= nil)
+      assert.is_true(text:match("3 behind") ~= nil)
+      assert.is_nil(text:match("Pending updates:"))
+    end)
+
+    it("maps every line of a plugin's rich block to that plugin for u/K/Enter", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 1)
+      state.set_outdated_detail("foo.nvim", {
+        revision_before = "aaa1111",
+        revision_after = "bbb2222",
+        upstream_branch = "main",
+        pending_commits = { "bbb2222 │ fix: x" },
+      })
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "Pending updates:")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+      ui.show_details()
+      local popup_buf = vim.api.nvim_get_current_buf()
+      local popup_text = table.concat(vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false), "\n")
+      assert.is_true(popup_text:match("foo%.nvim") ~= nil)
+    end)
+  end)
+
   describe("outdated updates", function()
     it("update_one calls async.update_plugin for the cursor plugin while on the Outdated tab", function()
       local config = config_with({ "user/foo.nvim" })
@@ -1676,31 +2057,69 @@ Append to `tests/ui_spec.lua`:
   end)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [ ] **Step 10: Run the tests to verify they fail**
 
 Run: `make test`
-Expected: FAIL — `attempt to call field 'update_one' (a nil value)`.
+Expected: FAIL — the rich-display tests fail because `render_outdated_tab` still renders the old compact-only format; `update_one`/`update_all_outdated` fail with `attempt to call field ... (a nil value)`.
 
-- [ ] **Step 3: Modify `async.lua`**
+- [ ] **Step 11: Modify `ui.lua`**
 
-In `M.update_plugin`, reset the behind-count on a successful pull:
+Replace `render_outdated_tab` (and add a new local `outdated_plugin_lines` helper above it):
 
 ```lua
-    M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
-      if code == 0 then
-        state.update_status(plugin.name, was_loaded and "loaded" or "installed")
-        state.set_behind(plugin.name, 0)
-      else
-        state.update_status(plugin.name, "error")
-      end
-      done()
-      if package.loaded["packui.ui"] then
-        require("packui.ui").update()
-      end
-    end)
-```
+local function outdated_plugin_lines(p)
+  if not p.pending_commits or #p.pending_commits == 0 then
+    return {
+      string.format("  ## %s — %d behind (press c to re-check)", p.name, p.behind),
+      "",
+    }
+  end
 
-- [ ] **Step 4: Modify `ui.lua`**
+  local branch_suffix = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""
+  local lines = {
+    "  ## " .. p.name,
+    "  Path:            " .. p.dir,
+    "  Source:          " .. p.url,
+    "  Revision before: " .. (p.revision_before or "?"),
+    "  Revision after:  " .. (p.revision_after or "?") .. branch_suffix,
+    "",
+    "  Pending updates:",
+  }
+  for _, commit in ipairs(p.pending_commits) do
+    table.insert(lines, "  > " .. commit)
+  end
+  table.insert(lines, "")
+  return lines
+end
+
+local function render_outdated_tab(lines, highlights)
+  local outdated = {}
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and p.behind and p.behind > 0 then
+      table.insert(outdated, p)
+    end
+  end
+  table.sort(outdated, function(a, b) return a.name < b.name end)
+
+  if #outdated == 0 then
+    table.insert(lines, "  No outdated plugins (press c to check)")
+    return
+  end
+
+  table.insert(lines, "  Outdated (" .. #outdated .. ")")
+  table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
+  table.insert(lines, "")
+
+  for _, p in ipairs(outdated) do
+    local header_line = #lines
+    for _, line in ipairs(outdated_plugin_lines(p)) do
+      table.insert(lines, line)
+      plugin_map[#lines] = p
+    end
+    table.insert(highlights, { line = header_line, col_start = 2, col_end = -1, hl = "Title" })
+  end
+end
+```
 
 Add after `M.toggle_disabled`:
 
@@ -1743,16 +2162,16 @@ At the end of `M.open` (after the initial `M.update()` call), trigger a backgrou
   require("packui.async").check_all_outdated()
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 12: Run the tests to verify they pass**
 
 Run: `make test`
-Expected: all `ui_spec.lua` tests pass, full suite 0 failures.
+Expected: all `ui_spec.lua`/`async_spec.lua`/`state_spec.lua` tests pass, full suite 0 failures.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
-git add lua/packui/ui.lua lua/packui/async.lua tests/ui_spec.lua
-git commit -m "feat: add outdated re-check (c) and update keymaps (u/U)"
+git add lua/packui/state.lua lua/packui/async.lua lua/packui/ui.lua tests/state_spec.lua tests/async_spec.lua tests/ui_spec.lua
+git commit -m "feat: rich per-plugin outdated display, recheck (c) and update keymaps (u/U)"
 ```
 
 ---
