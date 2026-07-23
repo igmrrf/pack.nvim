@@ -39,14 +39,14 @@ local function load_plugins(spec)
       local mod_name = mod_path:gsub("/", ".")
       local ok, mod = pcall(require, mod_name)
       if ok and type(mod) == "table" then
-        if mod[1] and type(mod[1]) == "string" then
-          -- It's a single plugin spec
-          table.insert(plugins, mod)
-        elseif mod[1] and type(mod[1]) == "table" then
+        if type(mod[1]) == "table" or #mod > 1 then
           -- It's a list of plugins
           for _, p in ipairs(mod) do
             table.insert(plugins, p)
           end
+        elseif mod[1] and type(mod[1]) == "string" then
+          -- It's a single plugin spec
+          table.insert(plugins, mod)
         end
       end
     end
