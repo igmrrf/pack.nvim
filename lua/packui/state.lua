@@ -2,6 +2,12 @@ local M = {}
 
 M.plugins = {}
 
+-- Derive the require() module name from a plugin name when `main` isn't set,
+-- following the common "<module>.nvim" repo naming convention.
+local function default_main(name)
+  return name:match("^(.+)%.nvim$") or name
+end
+
 -- normalize the plugin definition
 local function normalize(plugin)
   if type(plugin) == "string" then
@@ -24,6 +30,14 @@ local function normalize(plugin)
     full_url = "https://github.com/" .. url
   end
   
+  local config = plugin.config
+  if not config and plugin.opts then
+    local main = plugin.main or default_main(name)
+    config = function()
+      require(main).setup(plugin.opts)
+    end
+  end
+
   return {
     url = full_url,
     name = name,
@@ -32,7 +46,9 @@ local function normalize(plugin)
     event = plugin.event,
     ft = plugin.ft,
     keys = plugin.keys,
-    config = plugin.config,
+    main = plugin.main,
+    opts = plugin.opts,
+    config = config,
     dir = "",
     status = "unknown", -- missing, installed, loaded, error
     log = {},
