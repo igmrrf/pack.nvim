@@ -3,8 +3,16 @@ local state = require("packui.state")
 local M = {}
 
 M.max_jobs = 4
+M.max_log_lines = 500
 local queue = {}
 local active_jobs = 0
+
+local function append_log(plugin, line)
+  table.insert(plugin.log, line)
+  if #plugin.log > M.max_log_lines then
+    table.remove(plugin.log, 1)
+  end
+end
 
 local function process_queue()
   if active_jobs >= M.max_jobs or #queue == 0 then
@@ -26,8 +34,8 @@ function M.spawn(plugin, cmd, args, cwd, on_exit)
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
   
-  table.insert(plugin.log, "$ " .. cmd .. " " .. table.concat(args, " "))
-  
+  append_log(plugin, "$ " .. cmd .. " " .. table.concat(args, " "))
+
   local handle
   handle = vim.uv.spawn(cmd, {
     args = args,
@@ -43,20 +51,26 @@ function M.spawn(plugin, cmd, args, cwd, on_exit)
       if on_exit then on_exit(code) end
     end)
   end)
-  
+
   if not handle then
-    table.insert(plugin.log, "Failed to spawn " .. cmd)
+    stdout:close()
+    stderr:close()
+    append_log(plugin, "Failed to spawn " .. cmd)
     vim.schedule(function()
       if on_exit then on_exit(-1) end
     end)
     return
   end
-  
+
   local function on_read(err, data)
     if data then
       vim.schedule(function()
-        for line in data:gmatch("([^\r\n]+)") do
-          table.insert(plugin.log, line)
+        for line in data:gmatch("([^\n]+)") do
+          -- collapse carriage-return progress updates (e.g. git clone %) to the last segment
+          local last = line:match("([^\r]*)$")
+          if last ~= "" then
+            append_log(plugin, last)
+          end
         end
       end)
     end

@@ -116,7 +116,11 @@ function M.update()
       table.insert(groups.installed, p)
     end
   end
-  
+
+  for _, list in pairs(groups) do
+    table.sort(list, function(a, b) return a.name < b.name end)
+  end
+
   local highlights = {}
   local function render_group(name, list, icon, hl_group)
     if #list > 0 then

@@ -7,8 +7,12 @@ local function normalize(plugin)
   if type(plugin) == "string" then
     plugin = { plugin }
   end
-  
+
   local url = plugin[1]
+  if type(url) ~= "string" or url == "" then
+    return nil
+  end
+
   local match_name = url:match("/([^/]+)$")
   local name = plugin.as or (match_name and match_name or url)
   if name:sub(-4) == ".git" then
@@ -38,6 +42,10 @@ function M.init(config)
   M.plugins = {}
   for _, p in ipairs(config.plugins) do
     local normalized = normalize(p)
+    if not normalized then
+      vim.notify("packui: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
+      goto continue
+    end
     local path_type = normalized.lazy and "opt" or "start"
     local other_path_type = normalized.lazy and "start" or "opt"
     normalized.dir = config.install_path .. "/" .. path_type .. "/" .. normalized.name
@@ -56,6 +64,7 @@ function M.init(config)
     end
     
     M.plugins[normalized.name] = normalized
+    ::continue::
   end
 end
 
