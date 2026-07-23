@@ -6,7 +6,7 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **Pack UI
 
 ## ✨ Features
 
-* **Native Backend:** Exclusively uses `~/.local/share/nvim/site/pack/packui/{start,opt}`. No weird runtime path hacks.
+* **Native Backend:** Exclusively uses `~/.local/share/nvim/site/pack/packui/opt`. Every plugin (lazy or not) is `packadd`-ed explicitly through packui rather than relying on Neovim's native `start/` auto-load, which only scans 'packpath' entries that existed *before* `setup()` ever runs.
 * **Async Git Operations:** Non-blocking `git clone` and `git pull` utilizing `vim.uv` (libuv) with safe concurrency limits.
 * **Rich Dashboard UI:** A centralized floating window showing real-time plugin statuses.
 * **Log Streaming:** Press `<CR>` on any installing or updating plugin to view real-time `stdout` and `stderr` logs in a floating split.
@@ -17,7 +17,7 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **Pack UI
 Pack UI is designed to manage itself. Add this bootstrap snippet to the very top of your `init.lua`:
 
 ```lua
-local packui_path = vim.fn.stdpath("data") .. "/site/pack/packui/start/vimpack"
+local packui_path = vim.fn.stdpath("data") .. "/site/pack/packui/opt/vimpack"
 
 -- Automatically clone Pack UI if it's not installed
 if not vim.uv.fs_stat(packui_path) then
