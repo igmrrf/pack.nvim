@@ -128,9 +128,18 @@ require("packui").map_keys({
 
 When inside the dashboard (opened via `:Packui`), you can use the following keymaps:
 
+*   `q` - Close the dashboard or any popup.
+*   `?` - Show the full keymap help popup.
 *   `S` - Start a Sync operation (install/update).
-*   `<Enter>` - Show git output logs for the plugin under the cursor.
-*   `q` - Close the dashboard or the log view.
+*   `Tab` - Cycle tabs: All -> Outdated -> Disabled.
+*   `<Enter>` - Quick details for the plugin under the cursor.
+*   `K` - Full details (includes current commit) for the plugin under the cursor.
+*   `l` - Show git output logs for the plugin under the cursor.
+*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `packui-disabled.json` in your Neovim config directory; an already-loaded plugin needs a restart to fully unload.
+*   `c` - Check for outdated plugins (runs `git fetch` for every installed plugin).
+*   `u` - Update the plugin under the cursor (Outdated tab).
+*   `U` - Update every outdated plugin (Outdated tab).
+*   `/` - Native vim search.
 
 ## ⚙️ Default Configuration
 
