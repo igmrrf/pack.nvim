@@ -120,4 +120,51 @@ describe("packui.ui", function()
       assert.is_true(found)
     end)
   end)
+
+  describe("tabs", function()
+    it("excludes disabled plugins from the All tab and lists them in Disabled", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.set_disabled("bar.nvim", true)
+      ui.open(config)
+
+      local all_buf = vim.api.nvim_get_current_buf()
+      local all_lines = vim.api.nvim_buf_get_lines(all_buf, 0, -1, false)
+      local all_text = table.concat(all_lines, "\n")
+      assert.is_true(all_text:match("foo%.nvim") ~= nil)
+      assert.is_nil(all_text:match("bar%.nvim"))
+
+      ui.cycle_tab() -- all -> outdated
+      ui.cycle_tab() -- outdated -> disabled
+      local disabled_buf = vim.api.nvim_get_current_buf()
+      local disabled_lines = vim.api.nvim_buf_get_lines(disabled_buf, 0, -1, false)
+      local disabled_text = table.concat(disabled_lines, "\n")
+      assert.is_true(disabled_text:match("bar%.nvim") ~= nil)
+    end)
+
+    it("Outdated tab only lists plugins with behind > 0", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 2)
+      ui.open(config)
+
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("foo%.nvim") ~= nil)
+      assert.is_nil(text:match("bar%.nvim"))
+    end)
+
+    it("cycling from Disabled returns to All", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      ui.cycle_tab() -- all -> outdated
+      ui.cycle_tab() -- outdated -> disabled
+      ui.cycle_tab() -- disabled -> all
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("%[all%]") ~= nil)
+    end)
+  end)
 end)
