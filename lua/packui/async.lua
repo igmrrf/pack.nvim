@@ -215,14 +215,21 @@ function M.check_outdated(plugin)
         end
 
         if behind == 0 then
+          state.set_outdated_detail(plugin.name, {})
           done()
           return
         end
 
-        M.spawn(plugin, "git", { "rev-parse", "--short", "HEAD", "@{upstream}" }, plugin.dir, function(rev_code, rev_output)
+        -- Note: `git rev-parse --short HEAD @{upstream}` (both revs after a
+        -- single --short) fails with "fatal: Needed a single revision" on
+        -- real git; --short only tolerates one rev argument at a time.
+        -- Resolve full hashes instead and truncate them ourselves.
+        M.spawn(plugin, "git", { "rev-parse", "HEAD", "@{upstream}" }, plugin.dir, function(rev_code, rev_output)
           local revision_before, revision_after
           if rev_code == 0 then
-            revision_before, revision_after = M.parse_revision_pair(rev_output)
+            local full_before, full_after = M.parse_revision_pair(rev_output)
+            revision_before = full_before and full_before:sub(1, 7)
+            revision_after = full_after and full_after:sub(1, 7)
           end
 
           M.spawn(plugin, "git", { "rev-parse", "--abbrev-ref", "@{upstream}" }, plugin.dir, function(branch_code, branch_output)
