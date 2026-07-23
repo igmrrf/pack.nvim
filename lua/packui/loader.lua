@@ -81,6 +81,116 @@ local function setup_keys(p)
   end
 end
 
+local seen_cmds = {}
+
+function M.setup_triggers(p)
+  local group
+  if p.event or p.ft then
+    group = vim.api.nvim_create_augroup("packui_trigger_" .. p.name, { clear = true })
+  end
+
+  if p.cmd then
+    local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
+    for _, cmd in ipairs(cmds) do
+      if seen_cmds[cmd] and seen_cmds[cmd] ~= p.name then
+        vim.notify(
+          "packui: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
+          vim.log.levels.WARN
+        )
+      end
+      seen_cmds[cmd] = p.name
+      vim.api.nvim_create_user_command(cmd, function(args)
+        vim.api.nvim_del_user_command(cmd)
+        M.load(p.name)
+        local cmd_str = cmd
+        if args.args and args.args ~= "" then
+          cmd_str = cmd_str .. " " .. args.args
+        end
+        if args.bang then
+          cmd_str = cmd_str .. "!"
+        end
+        pcall(vim.cmd, cmd_str)
+      end, { nargs = "*", bang = true, complete = "file", force = true })
+    end
+  end
+
+  local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
+  local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
+  for _, file in ipairs(ftdetect_vim) do
+    local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
+    if not ok then
+      vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end
+  for _, file in ipairs(ftdetect_lua) do
+    local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
+    if not ok then
+      vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
+    end
+  end
+
+  if p.event then
+    local events = type(p.event) == "table" and p.event or { p.event }
+    for _, event in ipairs(events) do
+      vim.api.nvim_create_autocmd(event, {
+        group = group,
+        once = true,
+        callback = function()
+          M.load(p.name)
+        end,
+      })
+    end
+  end
+
+  if p.ft then
+    local fts = type(p.ft) == "table" and p.ft or { p.ft }
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      pattern = fts,
+      once = true,
+      callback = function()
+        M.load(p.name)
+      end,
+    })
+  end
+
+  if p.keys then
+    setup_keys(p)
+  end
+end
+
+function M.remove_triggers(p)
+  pcall(vim.api.nvim_del_augroup_by_name, "packui_trigger_" .. p.name)
+
+  if p.cmd then
+    local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
+    for _, cmd in ipairs(cmds) do
+      pcall(vim.api.nvim_del_user_command, cmd)
+      if seen_cmds[cmd] == p.name then
+        seen_cmds[cmd] = nil
+      end
+    end
+  end
+
+  if p.keys then
+    for _, entry in ipairs(normalize_key_entries(p.keys)) do
+      for _, mode in ipairs(entry.modes) do
+        pcall(vim.keymap.del, mode, entry.lhs)
+      end
+    end
+  end
+end
+
+function M.enable(p)
+  if p.lazy then
+    if p.status ~= "loaded" then
+      M.setup_triggers(p)
+    end
+  else
+    M.load(p.name)
+  end
+end
+
 function M.init(config)
   -- :packadd resolves <packpath-entry>/pack/*/opt|start/<name>, and our plugin
   -- dirs live at install_path/opt|start/<name>, so the packpath entry must be
@@ -95,90 +205,28 @@ function M.init(config)
   vim.opt.packpath:prepend(packpath_root)
 
   local plugins = state.get_plugins()
-  local seen_cmds = {}
 
   for _, p in pairs(plugins) do
-    if p.lazy and p.status == "installed" then
-      if p.cmd then
-        local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
-        for _, cmd in ipairs(cmds) do
-          if seen_cmds[cmd] then
-            vim.notify(
-              "packui: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
-              vim.log.levels.WARN
-            )
+    if not p.disabled then
+      if p.lazy and p.status == "installed" then
+        M.setup_triggers(p)
+      elseif not p.lazy and p.status == "installed" then
+        if packadd(p.name) then
+          state.update_status(p.name, "loaded")
+          if p.config then
+            vim.schedule(function()
+              local ok, err = pcall(p.config)
+              if not ok then
+                vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
+              end
+            end)
           end
-          seen_cmds[cmd] = p.name
-          vim.api.nvim_create_user_command(cmd, function(args)
-            vim.api.nvim_del_user_command(cmd)
-            M.load(p.name)
-            local cmd_str = cmd
-            if args.args and args.args ~= "" then
-              cmd_str = cmd_str .. " " .. args.args
-            end
-            if args.bang then
-              cmd_str = cmd_str .. "!"
-            end
-            pcall(vim.cmd, cmd_str)
-          end, { nargs = "*", bang = true, complete = "file" })
-        end
-      end
-      
-      -- Source ftdetect files for lazy plugins
-      local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
-      local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
-      for _, file in ipairs(ftdetect_vim) do
-        local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
-        if not ok then
-          vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
-        end
-      end
-      for _, file in ipairs(ftdetect_lua) do
-        local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
-        if not ok then
-          vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
-        end
-      end
-      
-      if p.event then
-        local events = type(p.event) == "table" and p.event or { p.event }
-        for _, event in ipairs(events) do
-          vim.api.nvim_create_autocmd(event, {
-            once = true,
-            callback = function()
-              M.load(p.name)
-            end,
-          })
         end
       end
 
-      if p.ft then
-        local fts = type(p.ft) == "table" and p.ft or { p.ft }
-        vim.api.nvim_create_autocmd("FileType", {
-          pattern = fts,
-          once = true,
-          callback = function()
-            M.load(p.name)
-          end,
-        })
+      if not p.lazy and p.keys and p.status == "loaded" then
+        setup_keys(p)
       end
-
-    elseif not p.lazy and p.status == "installed" then
-      if packadd(p.name) then
-        state.update_status(p.name, "loaded")
-        if p.config then
-          vim.schedule(function()
-            local ok, err = pcall(p.config)
-            if not ok then
-              vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
-            end
-          end)
-        end
-      end
-    end
-
-    if p.keys and (p.status == "installed" or p.status == "loaded") then
-      setup_keys(p)
     end
   end
 end
