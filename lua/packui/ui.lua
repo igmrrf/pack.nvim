@@ -153,6 +153,30 @@ function M.show_full_details()
   open_popup(lines, { height_pct = 0.5 })
 end
 
+function M.toggle_disabled()
+  local p = plugin_at_cursor()
+  if not p then
+    return
+  end
+
+  local new_disabled = not p.disabled
+  state.set_disabled(p.name, new_disabled)
+
+  if new_disabled then
+    require("packui.loader").remove_triggers(p)
+    if p.status == "loaded" then
+      vim.notify(
+        "packui: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
+        vim.log.levels.WARN
+      )
+    end
+  else
+    require("packui.loader").enable(p)
+  end
+
+  M.update()
+end
+
 function M.open(config)
   config_ref = config
   if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -192,6 +216,7 @@ function M.open(config)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "K", "<Cmd>lua require('packui.ui').show_full_details()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
   vim.api.nvim_buf_set_keymap(buf_id, "n", "<Tab>", "<Cmd>lua require('packui.ui').cycle_tab()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "x", "<Cmd>lua require('packui.ui').toggle_disabled()<CR>", opts)
 
   M.update()
 end
