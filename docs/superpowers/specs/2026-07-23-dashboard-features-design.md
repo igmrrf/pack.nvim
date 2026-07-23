@@ -45,6 +45,41 @@ Triggered:
 - Automatically, non-blocking, whenever `ui.open()` runs.
 - Manually via `c` (re-check), from any tab.
 
+### Rich outdated detail (Outdated tab display)
+
+The Outdated tab renders each plugin the same way Neovim's own built-in `vim.pack.update()` confirmation UI does — a per-plugin block with path, source, before/after revisions, and the actual list of pending commits — rather than a single "N behind" summary line. This is additive to the `behind`-count check above, not a replacement:
+
+When `behind > 0` (i.e. only for plugins that already have pending commits, avoiding wasted spawns for up-to-date plugins), `M.check_outdated` queues three more sequential git plumbing calls in `plugin.dir`:
+
+1. `git rev-parse --short HEAD @{upstream}` — two lines of output: local HEAD short hash (`revision_before`) and upstream short hash (`revision_after`).
+2. `git rev-parse --abbrev-ref @{upstream}` — e.g. `origin/main`; strip the remote-name prefix (text before the first `/`) to get the branch label (`main`) shown next to `revision_after`.
+3. `git log --format=%h │ %s HEAD..@{upstream}` — one line per pending commit, each already formatted as `<short-hash> │ <subject>`. Stored verbatim as `plugin.pending_commits` (a list of strings), capped at the existing `async.lua` log-line convention (no separate cap needed — this is a small, bounded list bounded by `behind`).
+
+All three calls degrade the same way as the rest of outdated-detection: any failure leaves the corresponding field `nil`/unset and the Outdated tab falls back to just the name + behind-count for that plugin, no error popup.
+
+New `state.lua` fields (extending the Task-3 plugin record, additive): `revision_before`, `revision_after`, `upstream_branch`, `pending_commits` (list|nil). A new `state.set_outdated_detail(name, detail)` mutator sets all four together (mirrors `set_behind`'s no-op-on-unknown-name guarantee).
+
+Outdated tab rendering (`render_outdated_tab` in `ui.lua`) becomes a per-plugin block instead of a single line:
+
+```
+  Outdated (2)
+
+  ## catppuccin.nvim
+  Path:            /.../opt/catppuccin.nvim
+  Source:          https://github.com/catppuccin/nvim
+  Revision before: e068ab5
+  Revision after:  c7c692a (main)
+
+  Pending updates:
+  > c7c692a │ fix: check if `auto_integrations` was explicitly disabled (#1023)
+  > 058e83d │ fix!: remove `default_integrations` (#1019)
+
+  ## mini.nvim
+  ...
+```
+
+Every line within a plugin's block (not just its header) maps to that plugin in `plugin_map`, so `u`/`K`/`Enter`/`l` work no matter where the cursor sits inside the block. If `pending_commits` hasn't been populated yet (check still running, or the rich-detail calls failed), the block falls back to a single compact line: `## <name> — <behind> behind (press c to re-check)`.
+
 ## Loader changes (`loader.lua`)
 
 Extract the per-plugin lazy-trigger setup (currently the `p.lazy` branch inside `M.init`'s loop, lines 100–165) into a standalone `M.setup_triggers(p)`, called both from `M.init()` (unchanged behavior) and from the new enable path below. This is the one refactor motivated directly by this feature (enabling a plugin needs to re-register triggers dynamically, and no such per-plugin entry point exists today).
@@ -53,7 +88,7 @@ Extract the per-plugin lazy-trigger setup (currently the `p.lazy` branch inside 
 
 Toggle key `x` (works in **All** and **Disabled** tabs) on the plugin under cursor:
 
-- **Disabling**: set `disabled = true`, persist via `persist.set_disabled(name, true)` immediately. Remove any lazy triggers already registered (`pcall` delete keymaps/autocmds/user-commands the plugin owns) so it stops loading on next trigger. Excluded from `sync` and from outdated-checks going forward. If the plugin is already `loaded` (packadd'd), `vim.notify` warns that full unload requires restarting Neovim (Neovim has no API to unregister a plugin's own autocmds/commands/globals once sourced) — no automatic restart.
+- **Disabling**: set `disabled = true`, persist via `persist.set_disabled(name, true)` immediately. If the plugin is not yet `loaded`, remove any lazy triggers already registered (`pcall` delete keymaps/autocmds/user-commands the plugin owns) so it stops loading on next trigger. Excluded from `sync` and from outdated-checks going forward. If the plugin is already `loaded` (packadd'd), do **not** touch its triggers or keymaps — there's nothing safe to tear down for a plugin whose `config()` already ran (its own code may have redefined those keys for real). Instead, `vim.notify` warns that full unload requires restarting Neovim (Neovim has no API to unregister a plugin's own autocmds/commands/globals once sourced) — no automatic restart.
 - **Enabling**: clear `disabled`, persist. If plugin is lazy and not currently loaded, call `loader.setup_triggers(p)` to re-register its `cmd`/`event`/`ft`/`keys` triggers immediately. If non-lazy, call the existing `loader.load(name)` immediately.
 
 ## Dashboard tabs

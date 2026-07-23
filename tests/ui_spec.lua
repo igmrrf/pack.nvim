@@ -220,5 +220,41 @@ describe("packui.ui", function()
       assert.is_true(ok)
       assert.is_true(state.get_plugins()["foo.nvim"].disabled)
     end)
+
+    it("a bare-lhs keys mapping on an already-loaded lazy plugin survives a disable->enable cycle", function()
+      -- Regression test: an already-loaded plugin's real, live keymap (bound
+      -- by the plugin's own config()) must never be torn down/rebuilt by
+      -- toggling disable/enable - there is nothing safe to restore for it.
+      local config = config_with({ { "user/foo.nvim", lazy = true, keys = "<leader>zz" } })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      -- Simulate the plugin's own config() having already (re)defined lhs
+      -- for real, as would happen once the plugin finished loading.
+      vim.keymap.set("n", "<leader>zz", function() end, { desc = "fixture: foo.nvim real mapping" })
+      assert.is_true(vim.fn.maparg("<leader>zz", "n") ~= "")
+
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.toggle_disabled() -- disable
+      assert.is_true(state.get_plugins()["foo.nvim"].disabled)
+      assert.is_true(vim.fn.maparg("<leader>zz", "n") ~= "", "keymap must survive disabling an already-loaded plugin")
+
+      -- foo.nvim no longer appears in the All tab once disabled - jump to
+      -- the Disabled tab to find it under the cursor again before re-enabling.
+      ui.cycle_tab() -- all -> outdated
+      ui.cycle_tab() -- outdated -> disabled
+      local disabled_buf = vim.api.nvim_get_current_buf()
+      local disabled_line = find_line(disabled_buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { disabled_line, 0 })
+
+      ui.toggle_disabled() -- re-enable
+      assert.is_false(state.get_plugins()["foo.nvim"].disabled)
+      assert.is_true(vim.fn.maparg("<leader>zz", "n") ~= "", "keymap must survive re-enabling an already-loaded plugin")
+
+      pcall(vim.keymap.del, "n", "<leader>zz")
+    end)
   end)
 end)

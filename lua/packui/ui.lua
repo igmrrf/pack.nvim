@@ -163,12 +163,13 @@ function M.toggle_disabled()
   state.set_disabled(p.name, new_disabled)
 
   if new_disabled then
-    require("packui.loader").remove_triggers(p)
     if p.status == "loaded" then
       vim.notify(
         "packui: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
         vim.log.levels.WARN
       )
+    else
+      require("packui.loader").remove_triggers(p)
     end
   else
     require("packui.loader").enable(p)
