@@ -54,6 +54,20 @@ local function load_plugins(spec)
   return plugins
 end
 
+-- Bulk-register keymaps: { { lhs, rhs, mode = "n"|{...}, desc = "...", ... }, ... }
+function M.map_keys(keys)
+  for _, k in ipairs(keys) do
+    local mode = k.mode or "n"
+    local opts = {}
+    for key, value in pairs(k) do
+      if type(key) == "string" and key ~= "mode" then
+        opts[key] = value
+      end
+    end
+    vim.keymap.set(mode, k[1], k[2], opts)
+  end
+end
+
 function M.setup(opts)
   local plugins
   if opts and opts.plugins then
