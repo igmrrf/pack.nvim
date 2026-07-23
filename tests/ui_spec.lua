@@ -24,9 +24,13 @@ local function find_line(buf, pattern)
 end
 
 local function close_all_but_one_window()
-  while #vim.api.nvim_list_wins() > 1 do
+  local max_attempts = 20
+  local attempts = 0
+  while #vim.api.nvim_list_wins() > 1 and attempts < max_attempts do
     pcall(vim.api.nvim_win_close, 0, true)
+    attempts = attempts + 1
   end
+  assert.equals(1, #vim.api.nvim_list_wins())
 end
 
 describe("packui.ui", function()
@@ -56,6 +60,28 @@ describe("packui.ui", function()
       local text = table.concat(lines, "\n")
       assert.is_true(text:match("Packui Keymaps") ~= nil)
       assert.is_true(text:match("close") ~= nil)
+    end)
+
+    it("wires '?' to open the help popup", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      local dashboard_buf = vim.api.nvim_get_current_buf()
+
+      -- Verify the keymap exists and is buffer-local
+      local mapping = vim.fn.maparg("?", "n", false, true)
+      assert.is_not_nil(mapping)
+      assert.is_true(mapping.buffer == 1)
+
+      -- Trigger the keymap and verify it opens the help popup
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("?", true, false, true), "mtx", false)
+      local popup_buf = vim.api.nvim_get_current_buf()
+      assert.are_not_equal(dashboard_buf, popup_buf)
+
+      -- Verify help content is displayed
+      local lines = vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false)
+      local text = table.concat(lines, "\n")
+      assert.is_true(text:match("Packui Keymaps") ~= nil)
     end)
   end)
 end)
