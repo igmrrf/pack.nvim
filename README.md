@@ -17,7 +17,7 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **Pack UI
 Pack UI is designed to manage itself. Add this bootstrap snippet to the very top of your `init.lua`:
 
 ```lua
-local packui_path = vim.fn.stdpath("data") .. "/site/pack/packui/start/packui.nvim"
+local packui_path = vim.fn.stdpath("data") .. "/site/pack/packui/start/vimpack"
 
 -- Automatically clone Pack UI if it's not installed
 if not vim.uv.fs_stat(packui_path) then
