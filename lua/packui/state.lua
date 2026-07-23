@@ -31,6 +31,7 @@ local function normalize(plugin)
     cmd = plugin.cmd,
     event = plugin.event,
     ft = plugin.ft,
+    keys = plugin.keys,
     config = plugin.config,
     dir = "",
     status = "unknown", -- missing, installed, loaded, error

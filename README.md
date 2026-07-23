@@ -10,7 +10,7 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **Pack UI
 * **Async Git Operations:** Non-blocking `git clone` and `git pull` utilizing `vim.uv` (libuv) with safe concurrency limits.
 * **Rich Dashboard UI:** A centralized floating window showing real-time plugin statuses.
 * **Log Streaming:** Press `<CR>` on any installing or updating plugin to view real-time `stdout` and `stderr` logs in a floating split.
-* **Lazy Loading:** Seamlessly supports `cmd`, `event`, and `ft` (filetype) triggers to dynamically load plugins right when you need them.
+* **Lazy Loading:** Seamlessly supports `cmd`, `event`, `ft` (filetype), and `keys` (keymap) triggers to dynamically load plugins right when you need them.
 
 ## 🚀 Installation & Bootstrapping
 
@@ -66,8 +66,26 @@ require("packui").setup({
       as = "catppuccin",
       lazy = true,
       event = "VimEnter"
+    },
+
+    -- Example: Lazy-loaded via Keymap (loads on first press, then replays the key)
+    {
+      "folke/flash.nvim",
+      lazy = true,
+      keys = { "s", { "S", mode = { "n", "x", "o" } } },
     }
   }
+})
+```
+
+### Bulk keymaps
+
+`require("packui").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
+
+```lua
+require("packui").map_keys({
+  { "<leader>e", "<cmd>Oil<cr>", desc = "Open Oil" },
+  { "<leader>gg", function() require("snacks").lazygit() end, desc = "Lazygit", mode = { "n", "v" } },
 })
 ```
 

@@ -11,7 +11,17 @@ local function packadd(name)
 end
 
 function M.init(config)
-  vim.opt.packpath:prepend(config.install_path)
+  -- :packadd resolves <packpath-entry>/pack/*/opt|start/<name>, and our plugin
+  -- dirs live at install_path/opt|start/<name>, so the packpath entry must be
+  -- install_path's grandparent (install_path itself must end in "pack/<name>").
+  local packpath_root = vim.fn.fnamemodify(config.install_path, ":h:h")
+  if vim.fn.fnamemodify(config.install_path, ":h:t") ~= "pack" then
+    vim.notify(
+      "packui: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
+      vim.log.levels.WARN
+    )
+  end
+  vim.opt.packpath:prepend(packpath_root)
 
   local plugins = state.get_plugins()
   local seen_cmds = {}
@@ -81,7 +91,33 @@ function M.init(config)
           end,
         })
       end
-      
+
+      if p.keys then
+        local keyspecs = {}
+        local raw = type(p.keys) == "table" and p.keys or { p.keys }
+        for _, k in ipairs(raw) do
+          if type(k) == "string" then
+            table.insert(keyspecs, { lhs = k, modes = { "n" } })
+          else
+            local modes = k.mode or "n"
+            table.insert(keyspecs, { lhs = k[1] or k.lhs, modes = type(modes) == "table" and modes or { modes } })
+          end
+        end
+        for _, spec in ipairs(keyspecs) do
+          local lhs = spec.lhs
+          local function trigger()
+            for _, mode in ipairs(spec.modes) do
+              pcall(vim.keymap.del, mode, lhs)
+            end
+            M.load(p.name)
+            vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(lhs, true, true, true), "m", false)
+          end
+          for _, mode in ipairs(spec.modes) do
+            vim.keymap.set(mode, lhs, trigger, { desc = "packui: lazy-load " .. p.name })
+          end
+        end
+      end
+
     elseif not p.lazy and p.status == "installed" then
       if packadd(p.name) then
         state.update_status(p.name, "loaded")
