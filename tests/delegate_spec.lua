@@ -91,6 +91,25 @@ describe("pack.init native delegation", function()
     assert.equals("v1.2.3", fake.added[1].version)
   end)
 
+  it("preserves pack.nvim metadata on native-style (src=) specs", function()
+    do_setup({
+      { src = "https://github.com/user/eager.nvim", name = "eager.nvim" },
+      { src = "https://github.com/user/lazy.nvim", name = "lazy.nvim", lazy = true, cmd = "LazyCmd" },
+    })
+    -- src-style lazy spec keeps its lazy trigger (not eagerly loaded)
+    assert.same({ "eager.nvim" }, loaded)
+    assert.same({ "lazy.nvim" }, triggered)
+
+    local p = state.get_plugins()["lazy.nvim"]
+    assert.is_true(p.lazy)
+    assert.equals("LazyCmd", p.cmd)
+    assert.equals("https://github.com/user/lazy.nvim", p.url)
+    -- native spec round-trips src correctly
+    local added = {}
+    for _, s in ipairs(fake.added) do added[s.name] = s end
+    assert.equals("https://github.com/user/lazy.nvim", added["lazy.nvim"].src)
+  end)
+
   it("vim.pack.add dynamically installs a new plugin via native", function()
     do_setup({ "user/foo.nvim" })
     local before = #fake.added

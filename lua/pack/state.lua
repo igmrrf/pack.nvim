@@ -45,13 +45,16 @@ local function normalize(plugin, config)
   if type(enabled) == "function" then enabled = enabled() end
   if enabled == false then return nil end
 
-  local url = plugin[1]
+  -- Accept both pack.nvim shorthand (url at [1]) and native vim.pack.Spec style
+  -- (`src=`). Handling it here means dependencies written either way normalize
+  -- too, and `src=` specs keep every pack.nvim field (lazy/event/opts/...).
+  local url = plugin[1] or plugin.src
   if type(url) ~= "string" or url == "" then
     return nil
   end
 
   local match_name = url:match("/([^/]+)$")
-  local name = plugin.as or (match_name and match_name or url)
+  local name = plugin.as or plugin.name or (match_name and match_name or url)
   if name:sub(-4) == ".git" then
     name = name:sub(1, -5)
   end
