@@ -97,6 +97,29 @@ end
 -- Native vim.pack has no non-mutating "am I behind upstream?" query, so we keep
 -- a lightweight read-only git probe purely to drive the dashboard indicator.
 
+-- Native vim.pack leaves plugins in a DETACHED HEAD (checked out at
+-- origin/<ref>), so `@{upstream}` doesn't exist. Resolve the ref to compare
+-- HEAD against: a branch-pinned plugin tracks origin/<branch>; an unpinned
+-- plugin tracks the remote's default branch (origin/HEAD). A plugin pinned to a
+-- tag/commit/version range has no "newer commits on the branch" notion, so
+-- return nil to skip it.
+function M.upstream_ref(plugin, dir)
+  if plugin.branch then
+    return "origin/" .. plugin.branch
+  end
+  if plugin.tag or plugin.commit or plugin.version or plugin.sem_version then
+    return nil
+  end
+  local out = vim.fn.system({ "git", "-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
+  if vim.v.shell_error == 0 then
+    local ref = vim.trim(out)
+    if ref ~= "" then
+      return ref
+    end
+  end
+  return nil
+end
+
 function M.check_outdated(plugin)
   if plugin.disabled or (plugin.status ~= "installed" and plugin.status ~= "loaded") then
     return
@@ -114,7 +137,16 @@ function M.check_outdated(plugin)
       return
     end
 
-    git(plugin, { "rev-list", "--count", "HEAD..@{upstream}" }, dir, function(count_code, count_out)
+    local ref = M.upstream_ref(plugin, dir)
+    if not ref then
+      -- Pinned (tag/commit/version) or no resolvable upstream: not "outdated".
+      state.set_behind(plugin.name, 0)
+      state.set_outdated_detail(plugin.name, {})
+      ui_update()
+      return
+    end
+
+    git(plugin, { "rev-list", "--count", "HEAD.." .. ref }, dir, function(count_code, count_out)
       if count_code ~= 0 then
         return
       end
@@ -132,7 +164,7 @@ function M.check_outdated(plugin)
 
       -- `--short` only tolerates one rev at a time; resolve full hashes and
       -- truncate ourselves.
-      git(plugin, { "rev-parse", "HEAD", "@{upstream}" }, dir, function(rev_code, rev_out)
+      git(plugin, { "rev-parse", "HEAD", ref }, dir, function(rev_code, rev_out)
         local revision_before, revision_after
         if rev_code == 0 then
           local full_before, full_after = M.parse_revision_pair(rev_out)
@@ -140,25 +172,20 @@ function M.check_outdated(plugin)
           revision_after = full_after and full_after:sub(1, 7)
         end
 
-        git(plugin, { "rev-parse", "--abbrev-ref", "@{upstream}" }, dir, function(branch_code, branch_out)
-          local upstream_branch
-          if branch_code == 0 then
-            upstream_branch = M.parse_upstream_branch_name(branch_out)
-          end
+        local upstream_branch = ref:gsub("^origin/", "")
 
-          git(plugin, { "log", "--format=%h │ %s", "HEAD..@{upstream}" }, dir, function(log_code, log_out)
-            local pending_commits = {}
-            if log_code == 0 then
-              pending_commits = M.parse_pending_commits(log_out)
-            end
-            state.set_outdated_detail(plugin.name, {
-              revision_before = revision_before,
-              revision_after = revision_after,
-              upstream_branch = upstream_branch,
-              pending_commits = pending_commits,
-            })
-            ui_update()
-          end)
+        git(plugin, { "log", "--format=%h │ %s", "HEAD.." .. ref }, dir, function(log_code, log_out)
+          local pending_commits = {}
+          if log_code == 0 then
+            pending_commits = M.parse_pending_commits(log_out)
+          end
+          state.set_outdated_detail(plugin.name, {
+            revision_before = revision_before,
+            revision_after = revision_after,
+            upstream_branch = upstream_branch,
+            pending_commits = pending_commits,
+          })
+          ui_update()
         end)
       end)
     end)

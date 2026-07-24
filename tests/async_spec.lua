@@ -158,6 +158,38 @@ describe("pack.async.check_outdated", function()
   end)
 end)
 
+describe("pack.async.upstream_ref", function()
+  it("tracks origin/<branch> for a branch-pinned plugin", function()
+    assert.equals("origin/develop", async.upstream_ref({ branch = "develop" }, "/nope"))
+  end)
+
+  it("returns nil for a tag/commit/version pin (nothing to track)", function()
+    assert.is_nil(async.upstream_ref({ tag = "v1.0.0" }, "/nope"))
+    assert.is_nil(async.upstream_ref({ commit = "abcdef1" }, "/nope"))
+    assert.is_nil(async.upstream_ref({ version = ">=1.0" }, "/nope"))
+  end)
+
+  it("resolves the remote default branch (origin/HEAD) for an unpinned plugin", function()
+    -- Real clone so origin/HEAD is set; mirrors native's detached-HEAD install.
+    local upstream = vim.fn.tempname() .. "-uref-up"
+    vim.fn.mkdir(upstream, "p")
+    local function run(cmd) vim.fn.system(cmd); assert.equals(0, vim.v.shell_error, table.concat(cmd, " ")) end
+    run({ "git", "init", "-q", "-b", "main", upstream })
+    run({ "git", "-C", upstream, "config", "user.email", "t@t" })
+    run({ "git", "-C", upstream, "config", "user.name", "t" })
+    vim.fn.writefile({ "x" }, upstream .. "/f.txt")
+    run({ "git", "-C", upstream, "add", "-A" })
+    run({ "git", "-C", upstream, "commit", "-q", "-m", "i" })
+    local clone = vim.fn.tempname() .. "-uref-clone"
+    run({ "git", "clone", "-q", upstream, clone })
+
+    assert.equals("origin/main", async.upstream_ref({}, clone))
+
+    vim.fn.delete(upstream, "rf")
+    vim.fn.delete(clone, "rf")
+  end)
+end)
+
 describe("pack.async.parse_revision_pair", function()
   it("splits two-line rev-parse output", function()
     local before, after = async.parse_revision_pair("abc123\ndef456\n")
