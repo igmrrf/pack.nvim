@@ -8,15 +8,13 @@ vim.pack.add({ "https://github.com/igmrrf/pack.nvim" })
 -- 2. Since vim.pack.add places the plugin in `opt/`, we must manually load it
 vim.cmd("packadd pack.nvim")
 
--- 3. Setup pack.nvim and instruct it to manage plugins in the same directory vim.pack uses
+-- 3. Setup pack.nvim. It delegates all git operations to native vim.pack, so
+--    there is nothing to configure about the install location.
 require("pack").setup({
-  -- Match the directory where vim.pack natively installs plugins
-  install_path = vim.fn.stdpath("data") .. "/site/pack/core",
-  
   plugins = {
-    -- Important: If you list pack.nvim here, pack.nvim will manage its own updates going forward.
-    -- DO NOT run `vim.pack.update()` on pack.nvim after this point, as it will conflict
-    -- with `pack.nvim`'s own internal Git operations during `:Pack sync`.
+    -- Safe to list pack.nvim here: it has no internal git engine, so
+    -- `:Pack sync` / `vim.pack.update()` update it via native vim.pack just
+    -- like any other plugin -- no conflict.
     { "igmrrf/pack.nvim" },
 
     -- Add your other plugins here

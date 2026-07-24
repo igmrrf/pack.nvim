@@ -89,4 +89,37 @@ describe("pack.state", function()
     assert.is_true(ok)
     assert.is_nil(state.get_plugins()["nonexistent.nvim"])
   end)
+
+  it("reconcile_from_native promotes installed->loaded when dir is on runtimepath", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local p = state.get_plugins()["foo.nvim"]
+    -- A plugin native itself packadd-ed (e.g. bootstrapped pack.nvim) is active
+    -- on rtp but never ran through our load_fn, so it sits at "installed".
+    local rtp_dir = vim.api.nvim_list_runtime_paths()[1]
+    p.status = "installed"
+
+    local fake_native = {
+      get = function()
+        return { { spec = { name = "foo.nvim" }, path = rtp_dir, rev = "deadbee" } }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+
+    assert.equals("loaded", p.status)
+  end)
+
+  it("reconcile_from_native leaves installed when dir is not on runtimepath", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local p = state.get_plugins()["foo.nvim"]
+    p.status = "installed"
+
+    local fake_native = {
+      get = function()
+        return { { spec = { name = "foo.nvim" }, path = "/nowhere/not/on/rtp/foo.nvim" } }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+
+    assert.equals("installed", p.status)
+  end)
 end)
