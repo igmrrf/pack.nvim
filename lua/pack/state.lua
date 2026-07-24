@@ -76,6 +76,7 @@ local function normalize(plugin, config)
     event = plugin.event,
     ft = plugin.ft,
     keys = plugin.keys,
+    pattern = plugin.pattern,
     main = plugin.main,
     opts = plugin.opts,
     config = config_fn,
@@ -216,6 +217,56 @@ function M.set_outdated_detail(name, detail)
   p.revision_after = detail.revision_after
   p.upstream_branch = detail.upstream_branch
   p.pending_commits = detail.pending_commits
+end
+
+-- Resolve a pack.nvim plugin's pin fields to native vim.pack's single
+-- `version`. Precedence: commit > tag > branch > version/sem_version range.
+-- A range string ("^1.0", ">=0.5") becomes a vim.version range object; a plain
+-- ref (branch/tag/sha) is passed through as a string, which native accepts.
+local function resolve_version(p)
+  if p.commit then return p.commit end
+  if p.tag then return p.tag end
+  if p.branch then return p.branch end
+  local range_str = p.version or p.sem_version
+  if range_str == nil then return nil end
+  if type(range_str) == "table" then
+    return range_str
+  end
+  local ok, range = pcall(vim.version.range, range_str)
+  if ok then return range end
+  vim.notify(
+    ("pack: '%s' has an invalid version range '%s', ignoring"):format(p.name, tostring(range_str)),
+    vim.log.levels.WARN
+  )
+  return nil
+end
+
+-- Translate an internal normalized plugin into a native vim.pack spec. All the
+-- lazy-loading / config metadata native has no concept of is stashed under
+-- `data`, which round-trips through vim.pack.get() and PackChanged payloads
+-- (functions survive vim.deepcopy by reference).
+function M.to_native_spec(p)
+  return {
+    src = p.url,
+    name = p.name,
+    version = resolve_version(p),
+    data = {
+      lazy = p.lazy,
+      event = p.event,
+      ft = p.ft,
+      cmd = p.cmd,
+      keys = p.keys,
+      pattern = p.pattern,
+      config = p.config,
+      opts = p.opts,
+      build = p.build,
+      init = p.init_hook,
+      cond = p.cond,
+      priority = p.priority,
+      main = p.main,
+      dependencies = p.dependencies,
+    },
+  }
 end
 
 return M
