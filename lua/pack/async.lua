@@ -144,6 +144,9 @@ local function run_build_hook(plugin, done_cb)
       done_cb()
     end)
   elseif type(plugin.build) == "string" then
+    -- SECURITY: a string build hook is executed verbatim via `sh -c`. This is
+    -- arbitrary shell, same trust model as lazy.nvim: only ever comes from the
+    -- user's own trusted plugin spec, never from a remote/lockfile value.
     M.spawn(plugin, "sh", { "-c", plugin.build }, plugin.dir, function(code)
       if code ~= 0 then
         vim.schedule(function() vim.notify("pack: build hook failed for " .. plugin.name .. " with code " .. tostring(code), vim.log.levels.ERROR) end)
@@ -153,6 +156,8 @@ local function run_build_hook(plugin, done_cb)
   else
     done_cb()
   end
+end
+
 M.run_build_hook = run_build_hook
 
 function M.install(plugin)
@@ -203,7 +208,7 @@ function M.install(plugin)
         local function do_checkout()
           if target_commit then
             M.spawn(plugin, "git", { "fetch", "origin", target_commit, "--depth", "1" }, plugin.dir, function()
-              M.spawn(plugin, "git", { "checkout", target_commit }, plugin.dir, function()
+              M.spawn(plugin, "git", { "checkout", target_commit, "--" }, plugin.dir, function()
                 finalize_install()
               end)
             end)
@@ -243,7 +248,7 @@ function M.install(plugin)
                   end
                   if best_tag then
                     plugin.tag = best_tag
-                    M.spawn(plugin, "git", { "checkout", best_tag }, plugin.dir, function()
+                    M.spawn(plugin, "git", { "checkout", best_tag, "--" }, plugin.dir, function()
                       do_checkout()
                     end)
                     return
@@ -276,54 +281,61 @@ function M.update_plugin(plugin)
       require("pack.ui").update()
     end
 
-    local function perform_update()
-      M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
-        if code == 0 then
-          M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
-            if rev_code == 0 and output then
-              local hash = output:match("([^\r\n]+)")
-              if hash then
-                require("pack.lock").set_commit(plugin.name, hash, plugin.url)
-              end
-            end
-            run_build_hook(plugin, function()
-              state.update_status(plugin.name, was_loaded and "loaded" or "installed")
-              state.set_behind(plugin.name, 0)
-              state.set_outdated_detail(plugin.name, {})
-              done()
-              if package.loaded["pack.ui"] then
-                require("pack.ui").update()
-              end
-            end)
-          end)
-        else
-          state.update_status(plugin.name, "error")
+    local function fail()
+      state.update_status(plugin.name, "error")
+      done()
+      if package.loaded["pack.ui"] then
+        require("pack.ui").update()
+      end
+    end
+
+    -- Record the resolved HEAD into the lockfile, run the build hook, then
+    -- settle status. Called after the working tree is already at its target.
+    local function record_and_finish()
+      M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
+        if rev_code == 0 and output then
+          local hash = output:match("([^\r\n]+)")
+          if hash then
+            require("pack.lock").set_commit(plugin.name, hash, plugin.url)
+          end
+        end
+        run_build_hook(plugin, function()
+          state.update_status(plugin.name, was_loaded and "loaded" or "installed")
+          state.set_behind(plugin.name, 0)
+          state.set_outdated_detail(plugin.name, {})
           done()
           if package.loaded["pack.ui"] then
             require("pack.ui").update()
           end
-        end
+        end)
       end)
     end
 
-    if plugin.commit then
-      M.spawn(plugin, "git", { "fetch", "origin", plugin.commit }, plugin.dir, function()
-        M.spawn(plugin, "git", { "checkout", plugin.commit }, plugin.dir, function()
-          perform_update()
+    if plugin.commit or plugin.tag then
+      -- Pinned to a fixed commit/tag: fetch the ref and check it out. Do NOT
+      -- `git pull --rebase` afterwards - that fails on the detached HEAD a
+      -- commit/tag checkout leaves us in and would defeat the pin anyway.
+      local ref = plugin.commit or plugin.tag
+      local fetch_args = plugin.tag and { "fetch", "origin", "--tags" } or { "fetch", "origin", ref }
+      M.spawn(plugin, "git", fetch_args, plugin.dir, function()
+        M.spawn(plugin, "git", { "checkout", ref, "--" }, plugin.dir, function(code)
+          if code == 0 then record_and_finish() else fail() end
         end)
-      end)
-    elseif plugin.tag then
-      M.spawn(plugin, "git", { "fetch", "origin", plugin.tag }, plugin.dir, function()
-        M.spawn(plugin, "git", { "checkout", plugin.tag }, plugin.dir, function()
-          perform_update()
-        end)
-      end)
-    elseif plugin.branch then
-      M.spawn(plugin, "git", { "checkout", plugin.branch }, plugin.dir, function()
-        perform_update()
       end)
     else
-      perform_update()
+      -- Tracking a branch (or the default branch): move to the branch tip.
+      local function pull()
+        M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
+          if code == 0 then record_and_finish() else fail() end
+        end)
+      end
+      if plugin.branch then
+        M.spawn(plugin, "git", { "checkout", plugin.branch, "--" }, plugin.dir, function(code)
+          if code == 0 then pull() else fail() end
+        end)
+      else
+        pull()
+      end
     end
   end)
   process_queue()
@@ -460,6 +472,17 @@ function M.check_all_outdated()
   end
 end
 
+-- Install only plugins that aren't on disk yet. Unlike sync(), this never
+-- pulls updates for already-installed plugins - safe to run on every startup.
+function M.install_missing()
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and p.status == "missing" then
+      p.log = {}
+      M.install(p)
+    end
+  end
+end
+
 function M.sync(config)
   for _, p in pairs(state.get_plugins()) do
     if p.disabled then
@@ -497,7 +520,7 @@ function M.restore()
           if package.loaded["pack.ui"] then require("pack.ui").update() end
 
           M.spawn(p, "git", { "fetch", "origin", target_commit }, p.dir, function()
-            M.spawn(p, "git", { "checkout", target_commit }, p.dir, function(code)
+            M.spawn(p, "git", { "checkout", target_commit, "--" }, p.dir, function(code)
               if code == 0 then
                 state.update_status(p.name, "installed")
                 state.set_behind(p.name, 0)

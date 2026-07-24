@@ -4,10 +4,29 @@ local M = {}
 
 M.plugins = {}
 
+-- Bumped whenever the set of registered plugins changes (add/remove). Consumers
+-- that cache derived views (e.g. loader's module->plugin map) compare against
+-- this to know when to rebuild instead of rescanning on every lookup.
+M.generation = 0
+
 -- Derive the require() module name from a plugin name when `main` isn't set,
 -- following the common "<module>.nvim" repo naming convention.
 local function default_main(name)
   return name:match("^(.+)%.nvim$") or name
+end
+
+-- Reject git refs that would be parsed as options (leading dash), e.g. a
+-- poisoned spec/lockfile value like "--upload-pack=...". These flow straight
+-- into `git` argv, so a ref starting with "-" is never legitimate.
+local function safe_ref(value, field, name)
+  if type(value) == "string" and value:find("^%-") then
+    vim.notify(
+      ("pack: ignoring %s '%s' for '%s' (leading dash not allowed)"):format(field, value, name),
+      vim.log.levels.WARN
+    )
+    return nil
+  end
+  return value
 end
 
 -- normalize the plugin definition
@@ -36,10 +55,10 @@ local function normalize(plugin, config)
     full_url = "https://github.com/" .. url
   end
   
-  local config = plugin.config
-  if not config and plugin.opts then
+  local config_fn = plugin.config
+  if not config_fn and plugin.opts then
     local main = plugin.main or default_main(name)
-    config = function()
+    config_fn = function()
       require(main).setup(plugin.opts)
     end
   end
@@ -48,11 +67,6 @@ local function normalize(plugin, config)
   if type(dependencies) == "string" then dependencies = { dependencies } end
 
   local build = plugin.build
-
-  local cond = plugin.cond
-  if cond == nil and config and config.defaults and config.defaults.cond ~= nil then
-    cond = config.defaults.cond
-  end
 
   return {
     url = full_url,
@@ -64,13 +78,13 @@ local function normalize(plugin, config)
     keys = plugin.keys,
     main = plugin.main,
     opts = plugin.opts,
-    config = config,
+    config = config_fn,
     init_hook = plugin.init,
-    cond = cond,
+    cond = plugin.cond,
     priority = plugin.priority or 50,
-    branch = plugin.branch,
-    tag = plugin.tag,
-    commit = plugin.commit,
+    branch = safe_ref(plugin.branch, "branch", name),
+    tag = safe_ref(plugin.tag, "tag", name),
+    commit = safe_ref(plugin.commit, "commit", name),
     version = plugin.version,
     sem_version = plugin.sem_version,
     module = plugin.module,
@@ -144,11 +158,24 @@ function M.add_plugin(p, config)
     table.insert(added_list, norm)
     ::continue::
   end
+  if #added_list > 0 then
+    M.generation = M.generation + 1
+  end
   return added_list
+end
+
+function M.remove_plugin(name)
+  if M.plugins[name] then
+    M.plugins[name] = nil
+    M.generation = M.generation + 1
+    return true
+  end
+  return false
 end
 
 function M.init(config)
   M.plugins = {}
+  M.generation = M.generation + 1
   for _, p in ipairs(config.plugins) do
     M.add_plugin(p, config)
   end

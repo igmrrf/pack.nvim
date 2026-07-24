@@ -28,27 +28,27 @@ end
 
 function M.save(data)
   if not lockfile_path then return end
-  
+
   local plugins = data.plugins or {}
-  local names = vim.tbl_keys(plugins)
-  table.sort(names)
-  
-  local lines = { "{", '  "plugins": {' }
-  for i, name in ipairs(names) do
-    local p = plugins[name]
+  -- Rebuild a clean object of only well-formed entries, then let vim.json
+  -- handle escaping (hand-rolled string.format produced invalid JSON for any
+  -- name/src containing a quote, backslash or newline).
+  local out = { plugins = {} }
+  for name, p in pairs(plugins) do
     if p and p.rev then
-      table.insert(lines, string.format('    "%s": {', name))
-      table.insert(lines, string.format('      "rev": "%s"%s', p.rev, p.src and "," or ""))
+      out.plugins[name] = { rev = p.rev }
       if p.src then
-        table.insert(lines, string.format('      "src": "%s"', p.src))
+        out.plugins[name].src = p.src
       end
-      table.insert(lines, string.format('    }%s', i < #names and "," or ""))
     end
   end
-  table.insert(lines, "  }")
-  table.insert(lines, "}")
-  
-  vim.fn.writefile(lines, lockfile_path)
+
+  local ok, encoded = pcall(vim.json.encode, out)
+  if not ok then
+    vim.notify("pack: failed to encode lockfile", vim.log.levels.ERROR)
+    return
+  end
+  vim.fn.writefile({ encoded }, lockfile_path)
 end
 
 function M.get_commit(name)

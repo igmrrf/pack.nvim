@@ -215,15 +215,38 @@ function M.build_cache()
     if not p.disabled and p.status == "installed" then
       local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
       for _, file in ipairs(ftdetect_vim) do
-        table.insert(lines, 'vim.cmd("source " .. ' .. string.format("q", vim.fn.fnameescape(file)) .. ')')
+        table.insert(lines, 'vim.cmd("source " .. ' .. string.format("%q", vim.fn.fnameescape(file)) .. ')')
       end
       local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
       for _, file in ipairs(ftdetect_lua) do
-        table.insert(lines, 'dofile(' .. string.format("q", file) .. ')')
+        table.insert(lines, 'dofile(' .. string.format("%q", file) .. ')')
       end
     end
   end
   vim.fn.writefile(lines, cache_file)
+end
+
+-- modname -> plugin lookup, rebuilt only when state.generation changes so the
+-- searcher stays O(1) per require instead of rescanning every plugin each time.
+local mod_cache = { gen = -1, map = {} }
+
+local function resolve_plugin(modname)
+  if mod_cache.gen ~= state.generation then
+    local map = {}
+    for name, p in pairs(state.get_plugins()) do
+      local base = p.main or (name:match("([^/]+)$") or name):gsub("%.nvim$", "")
+      map[name] = map[name] or p
+      map[base] = map[base] or p
+      local head = base:match("^([^.]+)")
+      if head then map[head] = map[head] or p end
+    end
+    mod_cache.map = map
+    mod_cache.gen = state.generation
+  end
+  local map = mod_cache.map
+  -- Exact module name, or the plugin owning the top-level segment
+  -- (require "telescope.builtin" -> plugin with base "telescope").
+  return map[modname] or map[modname:match("^([^.]+)")]
 end
 
 function M.init(config)
@@ -232,15 +255,7 @@ function M.init(config)
   -- Intercept requires for disabled plugins to prevent configuration crashes.
   -- If a disabled module is required directly (not inside pcall), we return a deep mock table.
   table.insert(package.loaders or package.searchers, 1, function(modname)
-    local plugins = state.get_plugins()
-    local target_p = nil
-    for name, p in pairs(plugins) do
-      local base = p.main or (name:match("([^/]+)$") or name):gsub("%.nvim$", "")
-      if modname == name or modname == base or modname:match("^" .. vim.pesc(base) .. "%.") then
-        target_p = p
-        break
-      end
-    end
+    local target_p = resolve_plugin(modname)
 
     if target_p then
       if target_p.disabled then

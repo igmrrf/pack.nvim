@@ -468,7 +468,16 @@ function M.update()
 
   vim.api.nvim_buf_clear_namespace(buf_id, ns_id, 0, -1)
   for _, h in ipairs(highlights) do
-    pcall(vim.api.nvim_buf_add_highlight, buf_id, ns_id, h.hl, h.line, h.col_start, h.col_end)
+    -- col_end == -1 means "to end of line"; extmarks need an explicit end_col.
+    local end_col = h.col_end
+    if end_col == -1 then
+      local line_text = lines[h.line + 1]
+      end_col = line_text and #line_text or h.col_start
+    end
+    pcall(vim.api.nvim_buf_set_extmark, buf_id, ns_id, h.line, h.col_start, {
+      end_col = end_col,
+      hl_group = h.hl,
+    })
   end
 
   if cursor and win_id and vim.api.nvim_win_is_valid(win_id) then
