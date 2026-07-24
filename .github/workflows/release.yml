@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: panvimdoc
+        uses: kdheepak/panvimdoc@main
+        with:
+          vimdoc: pack.nvim
+          version: "Neovim >= 0.12.0"
+          demojify: true
+          treesitter: true
+
+      - name: Push generated doc
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(doc): auto generate docs"
+          file_pattern: doc/*.txt
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true

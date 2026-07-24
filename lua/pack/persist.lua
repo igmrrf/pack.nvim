@@ -3,7 +3,7 @@ local M = {}
 local override_path = nil
 
 function M.path()
-  return override_path or (vim.fn.stdpath("config") .. "/nvim-pack-extra.json")
+  return override_path or vim.fs.joinpath(vim.fn.stdpath("config"), "nvim-pack-extra.json")
 end
 
 function M._set_path_for_testing(path)
@@ -84,11 +84,16 @@ function M.save(set)
     return false
   end
   local uv = vim.uv or vim.loop
-  local rename_ok = pcall(function()
-    assert(uv.fs_rename(tmp, path))
+  local rename_ok, err = pcall(function()
+    local ok, ren_err = uv.fs_rename(tmp, path)
+    if not ok then
+      -- Windows fallback: fs_rename fails if target exists.
+      os.remove(path)
+      assert(uv.fs_rename(tmp, path), ren_err)
+    end
   end)
   if not rename_ok then
-    vim.notify("pack: failed to write " .. path, vim.log.levels.ERROR)
+    vim.notify("pack: failed to write " .. path .. " (" .. tostring(err) .. ")", vim.log.levels.ERROR)
     pcall(vim.fn.delete, tmp)
     return false
   end

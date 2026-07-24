@@ -4,6 +4,14 @@ local M = {}
 
 M.max_log_lines = 500
 
+-- Hard timeout (ms) for a single read-only git probe. Without it a hung fetch
+-- (network black-hole, a private repo prompting for credentials with no tty)
+-- would never fire its callback, so run_queued's `inflight` never drops, the
+-- queue wedges, and the dashboard spinner spins forever. vim.system kills the
+-- process on timeout and still invokes on_exit (non-zero code), so the callback
+-- chain -> done -> pump keeps flowing.
+M.git_timeout = 60000
+
 -- How long (ms) to wait for a PackChanged(update) before force-restoring a
 -- plugin's status from "updating" (guards against native emitting no event).
 M.update_recover_ms = 30000
@@ -32,7 +40,7 @@ local function git(plugin, args, cwd, on_done)
   end
   -- vim.system raises synchronously if cwd doesn't exist; treat that as a
   -- failed command rather than propagating.
-  local ok, err = pcall(vim.system, cmd, { cwd = cwd, text = true }, function(res)
+  local ok, err = pcall(vim.system, cmd, { cwd = cwd, text = true, timeout = M.git_timeout }, function(res)
     vim.schedule(function()
       local out = res.stdout or ""
       local combined = out
@@ -160,6 +168,7 @@ function M.check_outdated(plugin, done)
   local function finish()
     if finished then return end
     finished = true
+    plugin.checking = nil
     done()
   end
 
@@ -170,10 +179,25 @@ function M.check_outdated(plugin, done)
   if not dir or dir == "" or vim.fn.isdirectory(dir) == 0 then
     return finish()
   end
+  -- Re-entrancy guard: a second check (double `c`, or `c` racing the auto-check
+  -- on dashboard open) while this one is in flight would spawn a duplicate
+  -- `git fetch` in the same worktree (lock contention, interleaved logs). Bail
+  -- if one is already running; `checked_at` alone can't cover this because it's
+  -- only set at the END of a successful check. Bail via done() directly, not
+  -- finish() -- finish() clears `checking`, which belongs to the in-flight run.
+  if plugin.checking then
+    return done()
+  end
+  plugin.checking = true
 
   git(plugin, { "fetch" }, dir, function(fetch_code)
     if fetch_code ~= 0 then
-      state.update_status(plugin.name, "error")
+      -- A read-only outdated probe must NEVER mutate load status. A transient
+      -- fetch failure (offline, DNS, private-repo auth prompt) would otherwise
+      -- flip a not-yet-loaded lazy plugin to "error", and loader.load
+      -- early-returns on "error" -- permanently killing that plugin's lazy
+      -- triggers for the session. Record the probe error only; "error" stays
+      -- reserved for real packadd/load failures.
       state.set_outdated_detail(plugin.name, { error = "Upstream fetch failed" })
       ui_update()
       return finish()
@@ -273,7 +297,7 @@ function M.outdated_targets()
   local now = os.time()
   local targets = {}
   for _, p in pairs(state.get_plugins()) do
-    if not p.disabled and (p.status == "installed" or p.status == "loaded") then
+    if not p.disabled and (p.status == "installed" or p.status == "loaded") and not p.checking then
       if not (p.checked_at and (now - p.checked_at) < M.outdated_cooldown) then
         targets[#targets + 1] = p
       end
@@ -323,7 +347,11 @@ local function run_build_step(plugin, hook, cb)
     -- there is no `sh`, so use cmd.exe.
     local shell = vim.fn.has("win32") == 1 and { "cmd", "/c", hook } or { "sh", "-c", hook }
     append_log(plugin, "$ " .. table.concat(shell, " "))
-    vim.system(shell, { cwd = plugin.dir, text = true }, function(res)
+    -- vim.system raises SYNCHRONOUSLY if cwd doesn't exist (e.g. :Pack build on
+    -- a registered-but-not-installed plugin). The git() helper pcall-guards for
+    -- this reason; the shell build path must too, or the throw escapes the
+    -- PackChanged autocmd / :Pack command.
+    local ok, err = pcall(vim.system, shell, { cwd = plugin.dir, text = true }, function(res)
       vim.schedule(function()
         local combined = (res.stdout or "")
         if res.stderr and res.stderr ~= "" then
@@ -341,6 +369,13 @@ local function run_build_step(plugin, hook, cb)
         cb()
       end)
     end)
+    if not ok then
+      vim.notify(
+        "pack: could not run build hook for " .. plugin.name .. ": " .. tostring(err),
+        vim.log.levels.ERROR
+      )
+      cb()
+    end
   else
     cb()
   end
@@ -388,13 +423,34 @@ function M.setup_build_hooks()
       -- load_fn also sets p.dir, but PackChanged(install) fires before it, so
       -- take the path straight from the event.
       p.dir = d.path or p.dir
-      -- Native vim.pack does not recurse submodules; initialize them on install
-      -- so plugins that ship submodules are complete before their build hook.
-      if d.kind == "install" and p.dir and vim.fn.filereadable(p.dir .. "/.gitmodules") == 1 then
-        vim.system({ "git", "submodule", "update", "--init", "--recursive" }, { cwd = p.dir })
+      local function maybe_build()
+        if p.build then
+          M.run_build_hook(p)
+        end
       end
-      if p.build then
-        M.run_build_hook(p)
+      -- Native vim.pack does not recurse submodules on INSTALL (it does on
+      -- update). Initialize them first, and only run the build hook once they
+      -- have populated -- a build that compiles submodule sources would
+      -- otherwise race an empty/partial tree. Gate the build behind the
+      -- submodule callback rather than firing both concurrently.
+      if d.kind == "install" and p.dir and vim.fn.filereadable(p.dir .. "/.gitmodules") == 1 then
+        append_log(p, "$ git submodule update --init --recursive")
+        local ok = pcall(vim.system, { "git", "submodule", "update", "--init", "--recursive" }, { cwd = p.dir }, function(res)
+          vim.schedule(function()
+            if res.code ~= 0 then
+              vim.notify(
+                "pack: submodule init failed for " .. p.name .. " (exit " .. tostring(res.code) .. ")",
+                vim.log.levels.WARN
+              )
+            end
+            maybe_build()
+          end)
+        end)
+        if not ok then
+          maybe_build()
+        end
+      else
+        maybe_build()
       end
       -- After an update the plugin is at the new revision: clear the stale
       -- outdated indicators and refresh the dashboard.

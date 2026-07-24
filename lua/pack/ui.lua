@@ -165,6 +165,7 @@ local function open_popup(lines, opts)
       local w = math.floor(vim.o.columns * (opts.width_pct or 0.6))
       local h = math.min(#lines + 2, math.floor(vim.o.lines * (opts.height_pct or 0.6)))
       vim.api.nvim_win_set_config(win, {
+        relative = "editor",
         width = w,
         height = h,
         row = math.floor((vim.o.lines - h) / 2),
@@ -251,6 +252,12 @@ function M.show_full_details()
     table.insert(lines, "  behind:   " .. tostring(p.behind) .. " commit(s)")
   else
     table.insert(lines, "  behind:   not checked")
+  end
+
+  -- Surface a read-only probe failure (e.g. offline fetch) without it being
+  -- conflated with the plugin's load status.
+  if p.outdated_error then
+    table.insert(lines, "  check:    " .. tostring(p.outdated_error))
   end
 
   open_popup(lines, { height_pct = 0.5 })
@@ -341,6 +348,7 @@ function M.open(config)
       local w = math.floor(vim.o.columns * 0.8)
       local h = math.floor(vim.o.lines * 0.8)
       vim.api.nvim_win_set_config(win_id, {
+        relative = "editor",
         width = w,
         height = h,
         row = math.floor((vim.o.lines - h) / 2),

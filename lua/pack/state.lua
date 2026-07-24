@@ -262,6 +262,10 @@ function M.set_outdated_detail(name, detail)
   p.revision_after = detail.revision_after
   p.upstream_branch = detail.upstream_branch
   p.pending_commits = detail.pending_commits
+  -- Probe-level error (e.g. a failed upstream fetch). Kept separate from the
+  -- plugin's load `status` so a read-only outdated check can surface a problem
+  -- without disabling the plugin. Cleared when a later check passes ({}).
+  p.outdated_error = detail.error
 end
 
 -- Refresh installed-status / on-disk path / recorded revision from what native

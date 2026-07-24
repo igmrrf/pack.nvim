@@ -91,7 +91,10 @@ describe("pack.async stuck-updating recovery (2.3)", function()
         error("boom")
       end,
     }
+    local orig_notify = vim.notify
+    vim.notify = function() end
     async.update_plugins({ "foo.nvim" })
+    vim.notify = orig_notify
     assert.equals("installed", p.status, "must not be left stuck in 'updating'")
   end)
 

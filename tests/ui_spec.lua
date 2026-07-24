@@ -190,7 +190,7 @@ describe("pack.ui", function()
     end)
 
     it("re-enabling from the Disabled tab clears the flag", function()
-      local config = config_with({ "user/foo.nvim" })
+      local config = config_with({ { "user/foo.nvim", lazy = true } })
       state.init(config)
       state.set_disabled("foo.nvim", true)
       ui.open(config)
