@@ -6,6 +6,7 @@ local M = {}
 
 M.config = {
   install_path = vim.fn.stdpath("data") .. "/site/pack/packui",
+  lockfile_path = vim.fn.stdpath("config") .. "/nvim-pack-lock.json",
   plugins = {},
   ui = {
     border = "rounded",
@@ -78,6 +79,7 @@ function M.setup(opts)
   M.config.plugins = plugins or M.config.plugins
   state.init(M.config)
   loader.init(M.config)
+  require("packui.lock").init(M.config)
   
   -- create commands
   vim.api.nvim_create_user_command("Packui", function()
@@ -86,6 +88,10 @@ function M.setup(opts)
   
   vim.api.nvim_create_user_command("PackuiSync", function()
     require("packui.async").sync(M.config)
+  end, {})
+
+  vim.api.nvim_create_user_command("PackuiRestore", function()
+    require("packui.async").restore()
   end, {})
 end
 

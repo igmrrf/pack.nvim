@@ -32,8 +32,8 @@ describe("packui.persist", function()
     assert.same({}, persist.load())
   end)
 
-  it("returns an empty set when json is an object instead of array", function()
-    vim.fn.writefile({ '{"foo.nvim": true}' }, tmp_path)
+  it("returns an empty set when json is an array instead of an object", function()
+    vim.fn.writefile({ '["foo.nvim"]' }, tmp_path)
     assert.same({}, persist.load())
   end)
 

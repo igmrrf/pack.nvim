@@ -3,14 +3,14 @@ local M = {}
 local override_path = nil
 
 function M.path()
-  return override_path or (vim.fn.stdpath("config") .. "/packui-disabled.json")
+  return override_path or (vim.fn.stdpath("config") .. "/nvim-pack-extra.json")
 end
 
 function M._set_path_for_testing(path)
   override_path = path
 end
 
-function M.load()
+function M._load_raw()
   local path = M.path()
   if vim.fn.filereadable(path) == 0 then
     return {}
@@ -23,34 +23,71 @@ function M.load()
   end
 
   local decode_ok, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
-  if not decode_ok or type(decoded) ~= "table" or not vim.islist(decoded) then
+  if not decode_ok or type(decoded) ~= "table" then
     vim.notify("packui: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
     return {}
   end
 
+  return decoded
+end
+
+function M.load()
+  local data = M._load_raw()
   local set = {}
-  for _, name in ipairs(decoded) do
-    if type(name) == "string" then
-      set[name] = true
+  if data.plugins then
+    for name, opts in pairs(data.plugins) do
+      if type(opts) == "table" and opts.disabled then
+        set[name] = true
+      end
     end
   end
   return set
 end
 
 function M.save(set)
-  local names = {}
+  local data = M._load_raw()
+  if not data.plugins then data.plugins = {} end
+  
+  for _, opts in pairs(data.plugins) do
+    if type(opts) == "table" then
+      opts.disabled = nil
+    end
+  end
+  
   for name in pairs(set) do
-    table.insert(names, name)
+    if not data.plugins[name] then data.plugins[name] = {} end
+    data.plugins[name].disabled = true
   end
+
+  for name, opts in pairs(data.plugins) do
+    if vim.tbl_isempty(opts) then
+      data.plugins[name] = nil
+    end
+  end
+
+  local lines = { "{", '  "plugins": {' }
+  local names = vim.tbl_keys(data.plugins)
   table.sort(names)
-
-  local encode_ok, encoded = pcall(vim.json.encode, names)
-  if not encode_ok then
-    vim.notify("packui: failed to encode disabled-plugin list", vim.log.levels.ERROR)
-    return false
+  
+  for i, name in ipairs(names) do
+    local opts = data.plugins[name]
+    table.insert(lines, string.format('    "%s": {', name))
+    
+    local opt_keys = vim.tbl_keys(opts)
+    table.sort(opt_keys)
+    
+    for j, k in ipairs(opt_keys) do
+      local v = opts[k]
+      local val_str = type(v) == "boolean" and tostring(v) or string.format('"%s"', v)
+      table.insert(lines, string.format('      "%s": %s%s', k, val_str, j < #opt_keys and "," or ""))
+    end
+    
+    table.insert(lines, string.format('    }%s', i < #names and "," or ""))
   end
+  table.insert(lines, "  }")
+  table.insert(lines, "}")
 
-  local write_ok = pcall(vim.fn.writefile, { encoded }, M.path())
+  local write_ok = pcall(vim.fn.writefile, lines, M.path())
   if not write_ok then
     vim.notify("packui: failed to write " .. M.path(), vim.log.levels.ERROR)
     return false

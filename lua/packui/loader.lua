@@ -193,6 +193,50 @@ function M.enable(p)
 end
 
 function M.init(config)
+  -- Intercept requires for disabled plugins to prevent configuration crashes.
+  -- If a disabled module is required directly (not inside pcall), we return a deep mock table.
+  table.insert(package.loaders or package.searchers, 1, function(modname)
+    local level = 1
+    local in_pcall = false
+    while true do
+      local info = debug.getinfo(level, "fn")
+      if not info then break end
+      if info.func == pcall or info.func == xpcall then
+        in_pcall = true
+        break
+      end
+      level = level + 1
+    end
+
+    if in_pcall then return nil end
+
+    local plugins = state.get_plugins()
+    local disabled_p = nil
+    for name, p in pairs(plugins) do
+      if p.disabled then
+        local base = name:match("([^/]+)$") or name
+        base = base:gsub("%.nvim$", "")
+        if modname == name or modname == base or modname:match("^" .. vim.pesc(base) .. "%.") then
+          disabled_p = p
+          break
+        end
+      end
+    end
+
+    if disabled_p then
+      return function()
+        local function make_mock()
+          local mock = {}
+          setmetatable(mock, {
+            __index = function() return make_mock() end,
+            __call = function() return make_mock() end,
+          })
+          return mock
+        end
+        return make_mock()
+      end
+    end
+  end)
   -- :packadd resolves <packpath-entry>/pack/*/opt|start/<name>, and our plugin
   -- dirs live at install_path/opt|start/<name>, so the packpath entry must be
   -- install_path's grandparent (install_path itself must end in "pack/<name>").
