@@ -7,6 +7,10 @@ local M = {}
 M.config = {
   install_path = vim.fn.stdpath("data") .. "/site/pack/pack",
   lockfile_path = vim.fn.stdpath("config") .. "/nvim-pack-lock.json",
+  -- Clone any `missing` (not-yet-on-disk) plugins on startup, lazy.nvim-style.
+  -- Only installs; never auto-updates already-installed plugins. Set false to
+  -- require an explicit `:Pack sync`.
+  install_missing = true,
   performance = {
     vim_loader = true,
   },
@@ -95,8 +99,13 @@ function M.setup(opts)
   state.init(M.config)
   loader.init(M.config)
   require("pack.lock").init(M.config)
-  
-  -- Drop-in replacement for vim.pack
+
+  -- Drop-in replacement for vim.pack. We intentionally shadow the Neovim 0.12
+  -- native API here: pack.nvim adds lazy-loading, version pinning and build
+  -- hooks that native vim.pack has no concept of, so add/update must go through
+  -- our engine. The native table is preserved on M.native_pack for anyone who
+  -- needs to reach the built-in behaviour directly.
+  M.native_pack = vim.pack
   vim.pack = vim.pack or {}
   vim.pack.add = function(specs)
     local items = specs
@@ -138,8 +147,13 @@ function M.setup(opts)
   vim.pack.del = function(names)
     if type(names) == "string" then names = { names } end
     for _, name in ipairs(names) do
-      if state.get_plugins()[name] then
-        state.get_plugins()[name] = nil
+      local p = state.get_plugins()[name]
+      if p then
+        -- Tear down any lazy triggers (autocmds/commands/keymaps) this plugin
+        -- registered before dropping it, otherwise they leak and fire against
+        -- a plugin that no longer exists.
+        pcall(function() loader.remove_triggers(p) end)
+        state.remove_plugin(name)
       end
     end
   end
@@ -192,8 +206,9 @@ function M.setup(opts)
       if target then
         local p = state.get_plugins()[target]
         if p and p.dir then
+          pcall(function() loader.remove_triggers(p) end)
           vim.fn.delete(p.dir, "rf")
-          state.get_plugins()[target] = nil
+          state.remove_plugin(target)
           vim.notify("pack: Deleted " .. target)
         end
       end
@@ -281,6 +296,23 @@ function M.setup(opts)
       return {}
     end
   })
+
+  -- Clone any not-yet-installed plugins after startup settles. Deferred so it
+  -- never blocks UI enter; only touches `missing` plugins, never updates.
+  if M.config.install_missing ~= false then
+    local has_missing = false
+    for _, p in pairs(state.get_plugins()) do
+      if not p.disabled and p.status == "missing" then
+        has_missing = true
+        break
+      end
+    end
+    if has_missing then
+      vim.schedule(function()
+        require("pack.async").install_missing()
+      end)
+    end
+  end
 end
 
 return M

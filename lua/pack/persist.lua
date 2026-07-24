@@ -65,29 +65,15 @@ function M.save(set)
     end
   end
 
-  local lines = { "{", '  "plugins": {' }
-  local names = vim.tbl_keys(data.plugins)
-  table.sort(names)
-  
-  for i, name in ipairs(names) do
-    local opts = data.plugins[name]
-    table.insert(lines, string.format('    "%s": {', name))
-    
-    local opt_keys = vim.tbl_keys(opts)
-    table.sort(opt_keys)
-    
-    for j, k in ipairs(opt_keys) do
-      local v = opts[k]
-      local val_str = type(v) == "boolean" and tostring(v) or string.format('"%s"', v)
-      table.insert(lines, string.format('      "%s": %s%s', k, val_str, j < #opt_keys and "," or ""))
-    end
-    
-    table.insert(lines, string.format('    }%s', i < #names and "," or ""))
+  -- Let vim.json handle escaping; the previous hand-rolled writer produced
+  -- invalid JSON for any name/value containing a quote, backslash or newline.
+  local encode_ok, encoded = pcall(vim.json.encode, data)
+  if not encode_ok then
+    vim.notify("pack: failed to encode " .. M.path(), vim.log.levels.ERROR)
+    return false
   end
-  table.insert(lines, "  }")
-  table.insert(lines, "}")
 
-  local write_ok = pcall(vim.fn.writefile, lines, M.path())
+  local write_ok = pcall(vim.fn.writefile, { encoded }, M.path())
   if not write_ok then
     vim.notify("pack: failed to write " .. M.path(), vim.log.levels.ERROR)
     return false
