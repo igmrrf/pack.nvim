@@ -301,7 +301,31 @@ function M.setup(opts)
         vim.notify("pack: Already clean")
       end
     elseif subcmd == "restore" then
+      -- force is left false, so native shows its confirmation buffer (a diff of
+      -- what would change) before rolling the working trees back to the
+      -- lockfile. This is intentionally review-gated: restore can undo real
+      -- updates. Use :Pack repair for the opposite (lockfile -> disk).
       native_call("restore", M.native_pack.update, nil, { target = "lockfile" })
+    elseif subcmd == "repair" then
+      -- Realign the lockfile's recorded revisions to the installed HEADs. Fixes
+      -- the "not at expected revision" health errors that arise when an update
+      -- checked out new revisions but the lockfile write did not persist.
+      local ok_lf, lockfile = pcall(require, "pack.lockfile")
+      if not ok_lf then
+        vim.notify("pack: lockfile helper unavailable", vim.log.levels.ERROR)
+        return
+      end
+      local fixed, err = lockfile.repair(state.native_opt_dir())
+      if not fixed then
+        vim.notify("pack: repair failed: " .. tostring(err), vim.log.levels.ERROR)
+      elseif #fixed == 0 then
+        vim.notify("pack: lockfile already matches installed revisions")
+      else
+        vim.notify(
+          ("pack: aligned lockfile to installed revisions for %d plugin(s): %s\nRestart Neovim (:restart) for native vim.pack to pick it up.")
+            :format(#fixed, table.concat(fixed, ", "))
+        )
+      end
     elseif subcmd == "profile" then
       ui.open(M.config)
       ui.show_profile()
@@ -316,7 +340,7 @@ function M.setup(opts)
       if CmdLine:sub(CursorPos, CursorPos):match("%s") then table.insert(args, "") end
 
       if #args <= 2 then
-        local subcommands = { "sync", "clean", "restore", "profile", "update", "build", "load", "delete" }
+        local subcommands = { "sync", "clean", "restore", "repair", "profile", "update", "build", "load", "delete" }
         local matches = {}
         for _, cmd in ipairs(subcommands) do
           if cmd:find("^" .. vim.pesc(ArgLead)) then

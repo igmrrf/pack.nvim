@@ -128,3 +128,4 @@ Build runner uses `vim.system` (drop custom `spawn`). String build -> `sh -c`
 4. Build hooks on PackChanged; gut async.lua to check_outdated + build (vim.system).
 5. UI re-source from get()+state.
 6. Full test pass + headless smoke (fake vim.pack) + real-nvim manual verify.
+7. Deployment Readiness: MIT License, vimdoc, robust hermetic testing, CI green.

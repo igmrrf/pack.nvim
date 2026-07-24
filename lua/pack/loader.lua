@@ -249,14 +249,10 @@ function M.enable(p)
 end
 
 function M.build_cache()
-  local cache_file = vim.fn.stdpath("data") .. "/pack_ftdetect_cache.lua"
+  local cache_file = vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
   local plugins = require("pack.state").get_plugins()
   local lines = {}
   for _, p in pairs(plugins) do
-    -- Precompile ftdetect only for LAZY plugins: an eager plugin is sourced at
-    -- startup anyway, so its ftdetect runs regardless. A not-yet-loaded lazy
-    -- plugin needs this cache for its filetypes to be detected before load.
-    -- Accept "loaded" too (a lazy plugin loaded earlier this session).
     if not p.disabled and p.lazy and (p.status == "installed" or p.status == "loaded") then
       local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
       for _, file in ipairs(ftdetect_vim) do
@@ -268,7 +264,13 @@ function M.build_cache()
       end
     end
   end
-  vim.fn.writefile(lines, cache_file)
+  local f = io.open(cache_file, "w")
+  if f then
+    if #lines > 0 then
+      f:write(table.concat(lines, "\n") .. "\n")
+    end
+    f:close()
+  end
 end
 
 -- modname -> plugin lookup, rebuilt only when state.generation changes so the
@@ -305,46 +307,49 @@ local function resolve_plugin(modname)
 end
 
 function M.init(config)
-  pcall(dofile, vim.fn.stdpath("data") .. "/pack_ftdetect_cache.lua")
+  pcall(dofile, vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua"))
 
   -- Intercept requires for disabled plugins to prevent configuration crashes.
   -- If a disabled module is required directly (not inside pcall), we return a deep mock table.
-  table.insert(package.loaders or package.searchers, 1, function(modname)
-    local target_p = resolve_plugin(modname)
+  if not M._searcher_installed then
+    table.insert(package.loaders or package.searchers, 1, function(modname)
+      local target_p = resolve_plugin(modname)
 
-    if target_p then
-      if target_p.disabled then
-        local level = 1
-        local in_pcall = false
-        while true do
-          local info = debug.getinfo(level, "fn")
-          if not info then break end
-          if info.func == pcall or info.func == xpcall then
-            in_pcall = true
-            break
+      if target_p then
+        if target_p.disabled then
+          local level = 1
+          local in_pcall = false
+          while true do
+            local info = debug.getinfo(level, "fn")
+            if not info then break end
+            if info.func == pcall or info.func == xpcall then
+              in_pcall = true
+              break
+            end
+            level = level + 1
           end
-          level = level + 1
-        end
 
-        if in_pcall then return nil end
+          if in_pcall then return nil end
 
-        return function()
-          local function make_mock()
-            local mock = {}
-            setmetatable(mock, {
-              __index = function() return make_mock() end,
-              __call = function() return make_mock() end,
-            })
-            return mock
+          return function()
+            local function make_mock()
+              local mock = {}
+              setmetatable(mock, {
+                __index = function() return make_mock() end,
+                __call = function() return make_mock() end,
+              })
+              return mock
+            end
+            return make_mock()
           end
-          return make_mock()
+        elseif target_p.status == "installed" and target_p.lazy and target_p.module ~= false then
+          M.load(target_p.name)
+          return nil
         end
-      elseif target_p.status == "installed" and target_p.lazy and target_p.module ~= false then
-        M.load(target_p.name)
-        return nil
       end
-    end
-  end)
+    end)
+    M._searcher_installed = true
+  end
   -- Native vim.pack installs plugins under stdpath('data')/site/pack/core/opt,
   -- which is already on 'packpath', so :packadd resolves by name with no
   -- prepending needed. (The old custom installer required packpath munging here.)
@@ -505,6 +510,12 @@ function M.load(name, opts)
   if package.loaded["pack.ui"] then
     require("pack.ui").update()
   end
+end
+function M._reset_for_testing()
+  pending = {}
+  seen_cmds = {}
+  mod_cache = { gen = -1, map = {} }
+  loading = {}
 end
 
 return M

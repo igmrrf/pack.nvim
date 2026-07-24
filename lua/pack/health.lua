@@ -80,6 +80,34 @@ function M.check()
       end
     end
   end
+
+  -- Lockfile divergence -----------------------------------------------------
+  -- HEAD ahead of / behind the recorded lockfile revision. Native's own
+  -- :checkhealth vim.pack reports this, but surface it here too with the safe
+  -- recovery, since :Pack restore would roll the working tree BACK to the
+  -- lockfile (undoing real updates) rather than forward.
+  local ok_lock, lockfile = pcall(require, "pack.lockfile")
+  if ok_lock then
+    local diverged = lockfile.divergences(state.native_opt_dir())
+    if #diverged > 0 then
+      local names = {}
+      for _, d in ipairs(diverged) do
+        names[#names + 1] = d.name
+      end
+      health.warn(
+        string.format(
+          "%d plugin(s) not at their lockfile revision: %s",
+          #diverged, table.concat(names, ", ")
+        ),
+        {
+          "Run :Pack repair to align the lockfile to the installed revisions",
+          "Or :Pack restore to roll the plugins BACK to the lockfile revisions",
+        }
+      )
+    else
+      health.ok("all plugins match their lockfile revision")
+    end
+  end
 end
 
 return M

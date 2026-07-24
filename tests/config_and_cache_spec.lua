@@ -1,8 +1,13 @@
 local state = require("pack.state")
 local loader = require("pack.loader")
 local pack = require("pack")
+local helpers = require("tests.helpers")
 
 describe("pack import spec normalization (1.4)", function()
+  before_each(function()
+    helpers.reset()
+  end)
+
   it("preserves opts/config on a single spec (not just the bare url)", function()
     local out = pack._load_plugins({ "owner/repo.nvim", opts = { a = 1 }, lazy = true })
     assert.equals(1, #out)
@@ -31,6 +36,10 @@ describe("pack import spec normalization (1.4)", function()
 end)
 
 describe("pack.state local plugin dir= (1.5)", function()
+  before_each(function()
+    helpers.reset()
+  end)
+
   it("uses dir= as the source instead of expanding to a GitHub URL", function()
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
@@ -52,6 +61,10 @@ describe("pack.state local plugin dir= (1.5)", function()
 end)
 
 describe("pack.loader local plugin load (1.5)", function()
+  before_each(function()
+    helpers.reset()
+  end)
+
   it("adds the local dir to runtimepath and sources its plugin files", function()
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir .. "/plugin", "p")
@@ -72,7 +85,11 @@ describe("pack.loader local plugin load (1.5)", function()
 end)
 
 describe("pack.loader ftdetect cache (1.6)", function()
-  local cache_file = vim.fn.stdpath("data") .. "/pack_ftdetect_cache.lua"
+  local cache_file = vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
+
+  before_each(function()
+    helpers.reset()
+  end)
 
   after_each(function()
     if vim.fn.filereadable(cache_file) == 1 then
