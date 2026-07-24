@@ -139,7 +139,7 @@ local function run_build_hook(plugin, done_cb)
   end
   if type(plugin.build) == "function" then
     vim.schedule(function()
-      local ok, err = pcall(plugin.build)
+      local ok, err = pcall(plugin.build, { path = plugin.dir, spec = plugin })
       if not ok then vim.notify("pack: build hook failed for " .. plugin.name .. "\n" .. tostring(err), vim.log.levels.ERROR) end
       done_cb()
     end)
