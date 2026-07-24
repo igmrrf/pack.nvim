@@ -5,7 +5,9 @@ local loader = require("pack.loader")
 local M = {}
 
 M.config = {
-  install_path = vim.fn.stdpath("data") .. "/site/pack/pack",
+  -- Install location and lockfile are owned by native vim.pack and are not
+  -- configurable; kept here for reference/back-compat only.
+  install_path = vim.fn.stdpath("data") .. "/site/pack/core/opt",
   lockfile_path = vim.fn.stdpath("config") .. "/nvim-pack-lock.json",
   performance = {
     vim_loader = true,
