@@ -11,7 +11,7 @@ local function default_main(name)
 end
 
 -- normalize the plugin definition
-local function normalize(plugin)
+local function normalize(plugin, config)
   if type(plugin) == "string" then
     plugin = { plugin }
   end
@@ -49,6 +49,11 @@ local function normalize(plugin)
 
   local build = plugin.build
 
+  local cond = plugin.cond
+  if cond == nil and config and config.defaults and config.defaults.cond ~= nil then
+    cond = config.defaults.cond
+  end
+
   return {
     url = full_url,
     name = name,
@@ -61,8 +66,14 @@ local function normalize(plugin)
     opts = plugin.opts,
     config = config,
     init_hook = plugin.init,
-    cond = plugin.cond,
+    cond = cond,
     priority = plugin.priority or 50,
+    branch = plugin.branch,
+    tag = plugin.tag,
+    commit = plugin.commit,
+    version = plugin.version,
+    sem_version = plugin.sem_version,
+    module = plugin.module,
     dir = "",
     status = "unknown", -- missing, installed, loaded, error
     log = {},
@@ -80,7 +91,7 @@ local function normalize(plugin)
 end
 
 function M.add_plugin(p, config)
-  local normalized = normalize(p)
+  local normalized = normalize(p, config)
   if not normalized then
     vim.notify("pack: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
     return {}
@@ -96,7 +107,7 @@ function M.add_plugin(p, config)
   
   while #queue > 0 do
     local curr = table.remove(queue, 1)
-    local norm = normalize(curr)
+    local norm = normalize(curr, config)
     if not norm then goto continue end
     if M.plugins[norm.name] then goto continue end
     

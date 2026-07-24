@@ -150,10 +150,54 @@ function M.setup(opts)
   
   -- create commands
   vim.api.nvim_create_user_command("Pack", function(opts)
-    local arg = opts.args
-    if arg == "sync" then
+    local args_list = {}
+    for word in opts.args:gmatch("%S+") do table.insert(args_list, word) end
+    local subcmd = args_list[1]
+    local target = args_list[2]
+
+    if subcmd == "sync" then
       require("pack.async").sync(M.config)
-    elseif arg == "clean" then
+    elseif subcmd == "update" then
+      if target then
+        local p = state.get_plugins()[target]
+        if p then
+          require("pack.async").update_plugin(p)
+          vim.notify("pack: Updating " .. target)
+        else
+          vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
+        end
+      else
+        require("pack.async").sync(M.config)
+      end
+    elseif subcmd == "build" then
+      if target then
+        local p = state.get_plugins()[target]
+        if p then
+          require("pack.async").run_build_hook(p, function() vim.notify("pack: Built " .. target) end)
+        else
+          vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
+        end
+      else
+        for _, p in pairs(state.get_plugins()) do
+          require("pack.async").run_build_hook(p, function() end)
+        end
+        vim.notify("pack: Triggered builds")
+      end
+    elseif subcmd == "load" then
+      if target then
+        require("pack.loader").load(target)
+        vim.notify("pack: Loaded " .. target)
+      end
+    elseif subcmd == "delete" then
+      if target then
+        local p = state.get_plugins()[target]
+        if p and p.dir then
+          vim.fn.delete(p.dir, "rf")
+          state.get_plugins()[target] = nil
+          vim.notify("pack: Deleted " .. target)
+        end
+      end
+    elseif subcmd == "clean" then
       local install_dir = M.config.install_path .. "/opt"
       local handle = vim.uv.fs_scandir(install_dir)
       if handle then
@@ -179,9 +223,9 @@ function M.setup(opts)
           vim.notify("pack: Already clean")
         end
       end
-    elseif arg == "restore" then
+    elseif subcmd == "restore" then
       require("pack.async").restore()
-    elseif arg == "profile" then
+    elseif subcmd == "profile" then
       local plugins = state.get_plugins()
       local profiles = {}
       for _, p in pairs(plugins) do
@@ -207,16 +251,34 @@ function M.setup(opts)
       ui.open(M.config)
     end
   end, {
-    nargs = "?",
+    nargs = "*",
     complete = function(ArgLead, CmdLine, CursorPos)
-      local subcommands = { "sync", "clean", "restore", "profile" }
-      local matches = {}
-      for _, cmd in ipairs(subcommands) do
-        if cmd:find("^" .. vim.pesc(ArgLead)) then
-          table.insert(matches, cmd)
+      local args = {}
+      for word in CmdLine:sub(1, CursorPos):gmatch("%S+") do table.insert(args, word) end
+      if CmdLine:sub(CursorPos, CursorPos):match("%s") then table.insert(args, "") end
+
+      if #args <= 2 then
+        local subcommands = { "sync", "clean", "restore", "profile", "update", "build", "load", "delete" }
+        local matches = {}
+        for _, cmd in ipairs(subcommands) do
+          if cmd:find("^" .. vim.pesc(ArgLead)) then
+            table.insert(matches, cmd)
+          end
+        end
+        return matches
+      elseif #args == 3 then
+        local subcmd = args[2]
+        if subcmd == "update" or subcmd == "build" or subcmd == "load" or subcmd == "delete" then
+          local matches = {}
+          for name, _ in pairs(state.get_plugins()) do
+            if name:find("^" .. vim.pesc(ArgLead)) then
+              table.insert(matches, name)
+            end
+          end
+          return matches
         end
       end
-      return matches
+      return {}
     end
   })
 end

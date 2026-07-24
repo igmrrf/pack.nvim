@@ -153,7 +153,7 @@ local function run_build_hook(plugin, done_cb)
   else
     done_cb()
   end
-end
+M.run_build_hook = run_build_hook
 
 function M.install(plugin)
   table.insert(queue, function(done)
@@ -165,10 +165,21 @@ function M.install(plugin)
     local parent_dir = vim.fn.fnamemodify(plugin.dir, ":h")
     vim.fn.mkdir(parent_dir, "p")
     
-    M.spawn(plugin, "git", { "clone", "--depth", "1", plugin.url, plugin.dir }, nil, function(code)
+    local clone_args = { "clone", "--depth", "1" }
+    if plugin.branch then
+      table.insert(clone_args, "--branch")
+      table.insert(clone_args, plugin.branch)
+    elseif plugin.tag then
+      table.insert(clone_args, "--branch")
+      table.insert(clone_args, plugin.tag)
+    end
+    table.insert(clone_args, plugin.url)
+    table.insert(clone_args, plugin.dir)
+
+    M.spawn(plugin, "git", clone_args, nil, function(code)
       if code == 0 then
         local lock = require("pack.lock")
-        local target_commit = lock.get_commit(plugin.name)
+        local target_commit = plugin.commit or lock.get_commit(plugin.name)
 
         local function finalize_install()
           run_build_hook(plugin, function()
@@ -189,21 +200,62 @@ function M.install(plugin)
           end)
         end
 
-        if target_commit then
-          M.spawn(plugin, "git", { "fetch", "origin", target_commit, "--depth", "1" }, plugin.dir, function()
-            M.spawn(plugin, "git", { "checkout", target_commit }, plugin.dir, function()
+        local function do_checkout()
+          if target_commit then
+            M.spawn(plugin, "git", { "fetch", "origin", target_commit, "--depth", "1" }, plugin.dir, function()
+              M.spawn(plugin, "git", { "checkout", target_commit }, plugin.dir, function()
+                finalize_install()
+              end)
+            end)
+          else
+            M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
+              if rev_code == 0 and output then
+                local hash = output:match("([^\r\n]+)")
+                if hash then lock.set_commit(plugin.name, hash, plugin.url) end
+              end
               finalize_install()
             end)
-          end)
-        else
-          M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
-            if rev_code == 0 and output then
-              local hash = output:match("([^\r\n]+)")
-              if hash then lock.set_commit(plugin.name, hash, plugin.url) end
-            end
-            finalize_install()
-          end)
+          end
         end
+
+        if plugin.version or plugin.sem_version then
+          local range_str = plugin.version or plugin.sem_version
+          local ok, range
+          if type(range_str) == "table" and range_str.has then
+            range = range_str
+          else
+            ok, range = pcall(vim.version.range, range_str)
+          end
+          if range then
+            M.spawn(plugin, "git", { "fetch", "--tags" }, plugin.dir, function()
+              M.spawn(plugin, "git", { "tag" }, plugin.dir, true, function(tcode, tout)
+                if tcode == 0 and tout then
+                  local best_v = nil
+                  local best_tag = nil
+                  for line in tout:gmatch("[^\r\n]+") do
+                    local parsed = vim.version.parse(line)
+                    if parsed and range:has(parsed) then
+                      if not best_v or vim.version.cmp(parsed, best_v) > 0 then
+                        best_v = parsed
+                        best_tag = line
+                      end
+                    end
+                  end
+                  if best_tag then
+                    plugin.tag = best_tag
+                    M.spawn(plugin, "git", { "checkout", best_tag }, plugin.dir, function()
+                      do_checkout()
+                    end)
+                    return
+                  end
+                end
+                do_checkout()
+              end)
+            end)
+            return
+          end
+        end
+        do_checkout()
       else
         state.update_status(plugin.name, "error")
         done()
@@ -224,33 +276,55 @@ function M.update_plugin(plugin)
       require("pack.ui").update()
     end
 
-    M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
-      if code == 0 then
-        M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
-          if rev_code == 0 and output then
-            local hash = output:match("([^\r\n]+)")
-            if hash then
-              require("pack.lock").set_commit(plugin.name, hash, plugin.url)
+    local function perform_update()
+      M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
+        if code == 0 then
+          M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
+            if rev_code == 0 and output then
+              local hash = output:match("([^\r\n]+)")
+              if hash then
+                require("pack.lock").set_commit(plugin.name, hash, plugin.url)
+              end
             end
-          end
-          run_build_hook(plugin, function()
-            state.update_status(plugin.name, was_loaded and "loaded" or "installed")
-            state.set_behind(plugin.name, 0)
-            state.set_outdated_detail(plugin.name, {})
-            done()
-            if package.loaded["pack.ui"] then
-              require("pack.ui").update()
-            end
+            run_build_hook(plugin, function()
+              state.update_status(plugin.name, was_loaded and "loaded" or "installed")
+              state.set_behind(plugin.name, 0)
+              state.set_outdated_detail(plugin.name, {})
+              done()
+              if package.loaded["pack.ui"] then
+                require("pack.ui").update()
+              end
+            end)
           end)
-        end)
-      else
-        state.update_status(plugin.name, "error")
-        done()
-        if package.loaded["pack.ui"] then
-          require("pack.ui").update()
+        else
+          state.update_status(plugin.name, "error")
+          done()
+          if package.loaded["pack.ui"] then
+            require("pack.ui").update()
+          end
         end
-      end
-    end)
+      end)
+    end
+
+    if plugin.commit then
+      M.spawn(plugin, "git", { "fetch", "origin", plugin.commit }, plugin.dir, function()
+        M.spawn(plugin, "git", { "checkout", plugin.commit }, plugin.dir, function()
+          perform_update()
+        end)
+      end)
+    elseif plugin.tag then
+      M.spawn(plugin, "git", { "fetch", "origin", plugin.tag }, plugin.dir, function()
+        M.spawn(plugin, "git", { "checkout", plugin.tag }, plugin.dir, function()
+          perform_update()
+        end)
+      end)
+    elseif plugin.branch then
+      M.spawn(plugin, "git", { "checkout", plugin.branch }, plugin.dir, function()
+        perform_update()
+      end)
+    else
+      perform_update()
+    end
   end)
   process_queue()
 end
