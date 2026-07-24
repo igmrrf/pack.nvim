@@ -55,6 +55,16 @@ function M.ensure_spinner()
     end
     spinner_idx = (spinner_idx % #SPINNER_FRAMES) + 1
     M.update()
+    -- Native vim.pack.update() blocks the main loop in vim.wait(): our timer
+    -- still fires and repaints the buffer, but Neovim won't flush the screen
+    -- until the wait yields. Force a redraw so the spinner actually animates
+    -- while an update is in flight (native does the same for its own progress).
+    for _, p in pairs(state.get_plugins()) do
+      if p.status == "updating" then
+        pcall(vim.cmd, "redraw")
+        break
+      end
+    end
   end, { ["repeat"] = -1 })
 end
 
