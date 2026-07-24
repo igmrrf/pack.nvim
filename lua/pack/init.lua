@@ -120,9 +120,10 @@ function M.add(specs)
     local raw = item
     if type(item) == "string" then
       raw = { item }
-    elseif type(item) == "table" and item.src then
-      raw = { item.src, as = item.name, version = item.version }
     end
+    -- Native-style ({ src=..., name=..., lazy=..., opts=... }) and shorthand
+    -- ({ "owner/repo", lazy=..., opts=... }) both pass through untouched;
+    -- normalize() reads url from [1] or src and keeps all pack.nvim fields.
     local newly = state.add_plugin(raw, M.config)
     for _, ap in ipairs(newly) do
       added[#added + 1] = ap
