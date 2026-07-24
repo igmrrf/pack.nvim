@@ -1,4 +1,4 @@
-local persist = require("packui.persist")
+local persist = require("pack.persist")
 
 local M = {}
 
@@ -40,6 +40,11 @@ local function normalize(plugin)
     end
   end
 
+  local dependencies = plugin.dependencies or {}
+  if type(dependencies) == "string" then dependencies = { dependencies } end
+
+  local build = plugin.build
+
   return {
     url = full_url,
     name = name,
@@ -61,42 +66,73 @@ local function normalize(plugin)
     revision_after = nil,
     upstream_branch = nil,
     pending_commits = nil,
+    dependencies = dependencies,
+    build = build,
+    local_dir = plugin.dir,
   }
+end
+
+function M.add_plugin(p, config)
+  local normalized = normalize(p)
+  if not normalized then
+    vim.notify("pack: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
+    return {}
+  end
+  
+  if M.plugins[normalized.name] then
+    return {}
+  end
+  
+  local disabled_set = persist.load()
+  local queue = { p }
+  local added_list = {}
+  
+  while #queue > 0 do
+    local curr = table.remove(queue, 1)
+    local norm = normalize(curr)
+    if not norm then goto continue end
+    if M.plugins[norm.name] then goto continue end
+    
+    for _, dep in ipairs(norm.dependencies) do
+      table.insert(queue, dep)
+    end
+    
+    norm.disabled = disabled_set[norm.name] or false
+    norm.dir = config.install_path .. "/opt/" .. norm.name
+    
+    if norm.local_dir then
+      norm.local_dir = vim.fn.expand(norm.local_dir)
+      if vim.fn.isdirectory(norm.dir) == 0 then
+        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
+        vim.fn.mkdir(parent_dir, "p")
+        pcall(vim.uv.fs_symlink, norm.local_dir, norm.dir, { dir = true })
+      end
+    else
+      local legacy_start_dir = config.install_path .. "/start/" .. norm.name
+      if vim.fn.isdirectory(norm.dir) == 0 and vim.fn.isdirectory(legacy_start_dir) == 1 then
+        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
+        vim.fn.mkdir(parent_dir, "p")
+        vim.fn.rename(legacy_start_dir, norm.dir)
+      end
+    end
+    
+    if vim.fn.isdirectory(norm.dir) == 1 then
+      norm.status = "installed"
+    else
+      norm.status = "missing"
+    end
+    
+    M.plugins[norm.name] = norm
+    table.insert(added_list, norm)
+    ::continue::
+  end
+  return added_list
 end
 
 function M.init(config)
   M.plugins = {}
-  local disabled_set = persist.load()
   for _, p in ipairs(config.plugins) do
-    local normalized = normalize(p)
-    if not normalized then
-      vim.notify("packui: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
-      goto continue
-    end
-    normalized.disabled = disabled_set[normalized.name] or false
-    -- Everything lives under opt/ and is packadd'd explicitly (lazily on
-    -- trigger, or immediately in loader.init() for non-lazy plugins).
-    -- :packadd only resolves pack/*/opt/{name} - a start/ package is only
-    -- auto-loaded by Nvim's own startup scan, which runs before install_path
-    -- is ever added to 'packpath', so start/ plugins installed or configured
-    -- through packui would silently never load.
-    normalized.dir = config.install_path .. "/opt/" .. normalized.name
-    local legacy_start_dir = config.install_path .. "/start/" .. normalized.name
-
-    if vim.fn.isdirectory(normalized.dir) == 0 and vim.fn.isdirectory(legacy_start_dir) == 1 then
-      local parent_dir = vim.fn.fnamemodify(normalized.dir, ":h")
-      vim.fn.mkdir(parent_dir, "p")
-      vim.fn.rename(legacy_start_dir, normalized.dir)
-    end
-    
-    if vim.fn.isdirectory(normalized.dir) == 1 then
-      normalized.status = "installed"
-    else
-      normalized.status = "missing"
-    end
-    
-    M.plugins[normalized.name] = normalized
-    ::continue::
+    M.add_plugin(p, config)
   end
 end
 

@@ -2,15 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add help popup, plugin detail views, persisted disable/enable, outdated-plugin detection with update keymaps, three-tab navigation, and a test harness to the `:Packui` dashboard.
+**Goal:** Add help popup, plugin detail views, persisted disable/enable, outdated-plugin detection with update keymaps, three-tab navigation, and a test harness to the `:Pack` dashboard.
 
-**Architecture:** Extend the existing `packui` modules (`state.lua`, `async.lua`, `loader.lua`, `ui.lua`) in place — no new top-level subsystems. One new pure-I/O module (`persist.lua`) owns the disabled-plugin JSON file. `ui.lua` gains a tab concept (`all`/`outdated`/`disabled`) rendered from the same `state.plugins` table plus two new fields (`disabled`, `behind`). All new interactive behavior is reachable from buffer-local keymaps on the existing dashboard buffer.
+**Architecture:** Extend the existing `pack` modules (`state.lua`, `async.lua`, `loader.lua`, `ui.lua`) in place — no new top-level subsystems. One new pure-I/O module (`persist.lua`) owns the disabled-plugin JSON file. `ui.lua` gains a tab concept (`all`/`outdated`/`disabled`) rendered from the same `state.plugins` table plus two new fields (`disabled`, `behind`). All new interactive behavior is reachable from buffer-local keymaps on the existing dashboard buffer.
 
 **Tech Stack:** Lua, Neovim 0.10+ APIs (`vim.uv`, `vim.json`, `vim.system`/`vim.fn.system`), plenary.nvim (busted-style tests, dev-only dependency), git CLI.
 
 ## Global Constraints
 
-- Disabled-plugin state persists to `stdpath('config') .. '/packui-disabled.json'` as a plain JSON array of plugin names (spec: hand-editable).
+- Disabled-plugin state persists to `stdpath('config') .. '/pack-disabled.json'` as a plain JSON array of plugin names (spec: hand-editable).
 - No true plugin "unload" — disabling an already-loaded plugin only warns; full unload requires restarting Neovim (spec: Neovim has no API to unregister a sourced plugin's own state).
 - Corrupt/missing state files and failed git operations must degrade silently (WARN notify, empty/nil fallback) — never crash `setup()` or the dashboard.
 - Search is native vim `/` — no code changes required for it; do not add a custom filter/prompt.
@@ -104,25 +104,25 @@ git commit -m "test: bootstrap plenary.nvim test harness"
 ### Task 2: `persist.lua` — disabled-plugin JSON store
 
 **Files:**
-- Create: `lua/packui/persist.lua`
+- Create: `lua/pack/persist.lua`
 - Test: `tests/persist_spec.lua`
 
 **Interfaces:**
 - Produces: `persist.path()`, `persist.load() -> {[name:string]=true}`, `persist.save(set)`, `persist.set_disabled(name, bool) -> set`, `persist._set_path_for_testing(path_or_nil)` (test seam, overrides the file path used by `path()`).
-- Consumes: nothing from other packui modules (pure I/O leaf module).
+- Consumes: nothing from other pack modules (pure I/O leaf module).
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/persist_spec.lua`:
 
 ```lua
-local persist = require("packui.persist")
+local persist = require("pack.persist")
 
-describe("packui.persist", function()
+describe("pack.persist", function()
   local tmp_path
 
   before_each(function()
-    tmp_path = vim.fn.tempname() .. "-packui-disabled.json"
+    tmp_path = vim.fn.tempname() .. "-pack-disabled.json"
     persist._set_path_for_testing(tmp_path)
   end)
 
@@ -163,11 +163,11 @@ end)
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `make test`
-Expected: FAIL — `module 'packui.persist' not found`.
+Expected: FAIL — `module 'pack.persist' not found`.
 
 - [ ] **Step 3: Implement `persist.lua`**
 
-`lua/packui/persist.lua`:
+`lua/pack/persist.lua`:
 
 ```lua
 local M = {}
@@ -175,7 +175,7 @@ local M = {}
 local override_path = nil
 
 function M.path()
-  return override_path or (vim.fn.stdpath("config") .. "/packui-disabled.json")
+  return override_path or (vim.fn.stdpath("config") .. "/pack-disabled.json")
 end
 
 function M._set_path_for_testing(path)
@@ -190,13 +190,13 @@ function M.load()
 
   local read_ok, lines = pcall(vim.fn.readfile, path)
   if not read_ok then
-    vim.notify("packui: failed to read " .. path, vim.log.levels.WARN)
+    vim.notify("pack: failed to read " .. path, vim.log.levels.WARN)
     return {}
   end
 
   local decode_ok, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not decode_ok or type(decoded) ~= "table" then
-    vim.notify("packui: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
+    vim.notify("pack: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
     return {}
   end
 
@@ -218,13 +218,13 @@ function M.save(set)
 
   local encode_ok, encoded = pcall(vim.json.encode, names)
   if not encode_ok then
-    vim.notify("packui: failed to encode disabled-plugin list", vim.log.levels.ERROR)
+    vim.notify("pack: failed to encode disabled-plugin list", vim.log.levels.ERROR)
     return false
   end
 
   local write_ok = pcall(vim.fn.writefile, { encoded }, M.path())
   if not write_ok then
-    vim.notify("packui: failed to write " .. M.path(), vim.log.levels.ERROR)
+    vim.notify("pack: failed to write " .. M.path(), vim.log.levels.ERROR)
     return false
   end
   return true
@@ -252,7 +252,7 @@ Expected: all `persist_spec.lua` tests pass, 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/persist.lua tests/persist_spec.lua
+git add lua/pack/persist.lua tests/persist_spec.lua
 git commit -m "feat: add persisted disabled-plugin JSON store"
 ```
 
@@ -261,7 +261,7 @@ git commit -m "feat: add persisted disabled-plugin JSON store"
 ### Task 3: Wire `disabled`/`behind`/`checked_at` into `state.lua`
 
 **Files:**
-- Modify: `lua/packui/state.lua`
+- Modify: `lua/pack/state.lua`
 - Test: `tests/state_spec.lua`
 
 **Interfaces:**
@@ -273,14 +273,14 @@ git commit -m "feat: add persisted disabled-plugin JSON store"
 `tests/state_spec.lua`:
 
 ```lua
-local state = require("packui.state")
-local persist = require("packui.persist")
+local state = require("pack.state")
+local persist = require("pack.persist")
 
-describe("packui.state", function()
+describe("pack.state", function()
   local tmp_path
 
   before_each(function()
-    tmp_path = vim.fn.tempname() .. "-packui-disabled.json"
+    tmp_path = vim.fn.tempname() .. "-pack-disabled.json"
     persist._set_path_for_testing(tmp_path)
   end)
 
@@ -293,7 +293,7 @@ describe("packui.state", function()
 
   local function config_with(plugins)
     return {
-      install_path = vim.fn.tempname() .. "-packui-install",
+      install_path = vim.fn.tempname() .. "-pack-install",
       plugins = plugins,
     }
   end
@@ -338,10 +338,10 @@ Expected: FAIL — `attempt to call field 'set_disabled' (a nil value)` and `dis
 
 - [ ] **Step 3: Modify `state.lua`**
 
-Add the require at the top of `lua/packui/state.lua`:
+Add the require at the top of `lua/pack/state.lua`:
 
 ```lua
-local persist = require("packui.persist")
+local persist = require("pack.persist")
 ```
 
 In the `normalize()` function, extend the returned table (existing fields unchanged, add three new ones):
@@ -376,7 +376,7 @@ function M.init(config)
   for _, p in ipairs(config.plugins) do
     local normalized = normalize(p)
     if not normalized then
-      vim.notify("packui: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
+      vim.notify("pack: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
       goto continue
     end
     normalized.disabled = disabled_set[normalized.name] or false
@@ -385,7 +385,7 @@ function M.init(config)
     -- :packadd only resolves pack/*/opt/{name} - a start/ package is only
     -- auto-loaded by Nvim's own startup scan, which runs before install_path
     -- is ever added to 'packpath', so start/ plugins installed or configured
-    -- through packui would silently never load.
+    -- through pack would silently never load.
     normalized.dir = config.install_path .. "/opt/" .. normalized.name
     local legacy_start_dir = config.install_path .. "/start/" .. normalized.name
 
@@ -435,7 +435,7 @@ Expected: all `state_spec.lua` tests pass, 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/state.lua tests/state_spec.lua
+git add lua/pack/state.lua tests/state_spec.lua
 git commit -m "feat: track disabled/behind state, persist disabled flag"
 ```
 
@@ -444,7 +444,7 @@ git commit -m "feat: track disabled/behind state, persist disabled flag"
 ### Task 4: `async.lua` — outdated detection
 
 **Files:**
-- Modify: `lua/packui/async.lua`
+- Modify: `lua/pack/async.lua`
 - Test: `tests/async_spec.lua`
 
 **Interfaces:**
@@ -456,9 +456,9 @@ git commit -m "feat: track disabled/behind state, persist disabled flag"
 `tests/async_spec.lua`:
 
 ```lua
-local async = require("packui.async")
+local async = require("pack.async")
 
-describe("packui.async.parse_behind_count", function()
+describe("pack.async.parse_behind_count", function()
   it("parses a well-formed count with trailing newline", function()
     assert.equals(3, async.parse_behind_count("3\n"))
   end)
@@ -488,7 +488,7 @@ Expected: FAIL — `attempt to call field 'parse_behind_count' (a nil value)`.
 
 - [ ] **Step 3: Modify `async.lua`**
 
-Add `local state = require("packui.state")` — already present at line 1, no change needed there.
+Add `local state = require("pack.state")` — already present at line 1, no change needed there.
 
 Replace the body of `M.spawn` (the existing function) so the single `on_read` closure becomes a factory that also captures stdout, and `on_exit` is called with the captured text:
 
@@ -577,8 +577,8 @@ function M.check_outdated(plugin)
           local behind = M.parse_behind_count(output)
           if behind then
             state.set_behind(plugin.name, behind)
-            if package.loaded["packui.ui"] then
-              require("packui.ui").update()
+            if package.loaded["pack.ui"] then
+              require("pack.ui").update()
             end
           end
         end
@@ -606,7 +606,7 @@ Expected: all `async_spec.lua` tests pass. Also re-run the full suite to confirm
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/async.lua tests/async_spec.lua
+git add lua/pack/async.lua tests/async_spec.lua
 git commit -m "feat: add git-fetch based outdated-plugin detection"
 ```
 
@@ -615,7 +615,7 @@ git commit -m "feat: add git-fetch based outdated-plugin detection"
 ### Task 5: `loader.lua` — extract trigger lifecycle (setup/remove/enable)
 
 **Files:**
-- Modify: `lua/packui/loader.lua`
+- Modify: `lua/pack/loader.lua`
 - Test: `tests/loader_spec.lua`
 
 **Interfaces:**
@@ -627,9 +627,9 @@ git commit -m "feat: add git-fetch based outdated-plugin detection"
 `tests/loader_spec.lua`:
 
 ```lua
-local loader = require("packui.loader")
+local loader = require("pack.loader")
 
-describe("packui.loader triggers", function()
+describe("pack.loader triggers", function()
   local function make_plugin(overrides)
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
@@ -653,7 +653,7 @@ describe("packui.loader triggers", function()
   it("registers a FileType autocmd under a per-plugin augroup for a ft trigger", function()
     local p = make_plugin({ ft = "fixturefiletype" })
     loader.setup_triggers(p)
-    local autocmds = vim.api.nvim_get_autocmds({ group = "packui_trigger_fixture.nvim" })
+    local autocmds = vim.api.nvim_get_autocmds({ group = "pack_trigger_fixture.nvim" })
     assert.is_true(#autocmds > 0)
     loader.remove_triggers(p)
   end)
@@ -674,7 +674,7 @@ describe("packui.loader triggers", function()
     local commands = vim.api.nvim_get_commands({})
     assert.is_nil(commands["FixtureCmdRemove"])
 
-    local ok = pcall(vim.api.nvim_get_autocmds, { group = "packui_trigger_fixture.nvim" })
+    local ok = pcall(vim.api.nvim_get_autocmds, { group = "pack_trigger_fixture.nvim" })
     assert.is_false(ok)
   end)
 
@@ -705,7 +705,7 @@ Add `M.setup_triggers` and `M.remove_triggers` after `setup_keys` and before `M.
 function M.setup_triggers(p)
   local group
   if p.event or p.ft then
-    group = vim.api.nvim_create_augroup("packui_trigger_" .. p.name, { clear = true })
+    group = vim.api.nvim_create_augroup("pack_trigger_" .. p.name, { clear = true })
   end
 
   if p.cmd then
@@ -713,7 +713,7 @@ function M.setup_triggers(p)
     for _, cmd in ipairs(cmds) do
       if seen_cmds[cmd] and seen_cmds[cmd] ~= p.name then
         vim.notify(
-          "packui: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
+          "pack: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
           vim.log.levels.WARN
         )
       end
@@ -779,7 +779,7 @@ function M.setup_triggers(p)
 end
 
 function M.remove_triggers(p)
-  pcall(vim.api.nvim_del_augroup_by_name, "packui_trigger_" .. p.name)
+  pcall(vim.api.nvim_del_augroup_by_name, "pack_trigger_" .. p.name)
 
   if p.cmd then
     local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
@@ -821,7 +821,7 @@ function M.init(config)
   local packpath_root = vim.fn.fnamemodify(config.install_path, ":h:h")
   if vim.fn.fnamemodify(config.install_path, ":h:t") ~= "pack" then
     vim.notify(
-      "packui: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
+      "pack: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
       vim.log.levels.WARN
     )
   end
@@ -871,7 +871,7 @@ Expected: all `loader_spec.lua` tests pass, and the full suite (`persist`, `stat
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/loader.lua tests/loader_spec.lua
+git add lua/pack/loader.lua tests/loader_spec.lua
 git commit -m "refactor: extract loader trigger lifecycle into setup/remove/enable"
 ```
 
@@ -880,7 +880,7 @@ git commit -m "refactor: extract loader trigger lifecycle into setup/remove/enab
 ### Task 6: `ui.lua` — shared popup helper + help popup (`?`)
 
 **Files:**
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/pack/ui.lua`
 - Test: `tests/ui_spec.lua`
 
 **Interfaces:**
@@ -892,13 +892,13 @@ git commit -m "refactor: extract loader trigger lifecycle into setup/remove/enab
 `tests/ui_spec.lua` (new file — later tasks append more `describe` blocks to it):
 
 ```lua
-local ui = require("packui.ui")
-local state = require("packui.state")
-local persist = require("packui.persist")
+local ui = require("pack.ui")
+local state = require("pack.state")
+local persist = require("pack.persist")
 
 local function config_with(plugins)
   return {
-    install_path = vim.fn.tempname() .. "-packui-install",
+    install_path = vim.fn.tempname() .. "-pack-install",
     ui = {
       border = "rounded",
       icons = { loaded = "*", not_loaded = "o", error = "x", sync = "~" },
@@ -923,7 +923,7 @@ local function close_all_but_one_window()
   end
 end
 
-describe("packui.ui", function()
+describe("pack.ui", function()
   local tmp_path
 
   before_each(function()
@@ -948,7 +948,7 @@ describe("packui.ui", function()
       local buf = vim.api.nvim_get_current_buf()
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local text = table.concat(lines, "\n")
-      assert.is_true(text:match("Packui Keymaps") ~= nil)
+      assert.is_true(text:match("Pack Keymaps") ~= nil)
       assert.is_true(text:match("close") ~= nil)
     end)
   end)
@@ -1015,7 +1015,7 @@ local function open_popup(lines, opts)
 end
 
 function M.show_help()
-  local lines = { "  Packui Keymaps", "  ===============", "" }
+  local lines = { "  Pack Keymaps", "  ===============", "" }
   for _, entry in ipairs(KEYMAP_HELP) do
     table.insert(lines, string.format("  %-7s %-14s %s", entry.key, entry.scope, entry.desc))
   end
@@ -1026,7 +1026,7 @@ end
 In `M.open`, add the `?` keymap alongside the existing ones:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "?", "<Cmd>lua require('packui.ui').show_help()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
@@ -1037,7 +1037,7 @@ Expected: `ui_spec.lua`'s help-popup test passes; full suite still 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/ui.lua tests/ui_spec.lua
+git add lua/pack/ui.lua tests/ui_spec.lua
 git commit -m "feat: add dashboard help popup (?)"
 ```
 
@@ -1046,7 +1046,7 @@ git commit -m "feat: add dashboard help popup (?)"
 ### Task 7: `ui.lua` — quick/full plugin details, move logs to `l`
 
 **Files:**
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/pack/ui.lua`
 - Test: `tests/ui_spec.lua` (append)
 
 **Interfaces:**
@@ -1055,7 +1055,7 @@ git commit -m "feat: add dashboard help popup (?)"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/ui_spec.lua` (inside the outer `describe("packui.ui", ...)` block, alongside the help-popup `describe`):
+Append to `tests/ui_spec.lua` (inside the outer `describe("pack.ui", ...)` block, alongside the help-popup `describe`):
 
 ```lua
   describe("details popups", function()
@@ -1181,24 +1181,24 @@ function M.show_log()
     return
   end
   local buf = open_popup(p.log, { wrap = true })
-  vim.bo[buf].filetype = "packui_log"
+  vim.bo[buf].filetype = "pack_log"
 end
 ```
 
 In `M.open`, replace the three existing keymap lines:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackuiSync<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackSync<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
 ```
 
 with:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackuiSync<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('packui.ui').show_details()<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "K", "<Cmd>lua require('packui.ui').show_full_details()<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "S", "<Cmd>PackSync<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "<CR>", "<Cmd>lua require('pack.ui').show_details()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -1209,7 +1209,7 @@ Expected: all `ui_spec.lua` tests pass; full suite 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/ui.lua tests/ui_spec.lua
+git add lua/pack/ui.lua tests/ui_spec.lua
 git commit -m "feat: add quick/full plugin details popups, move logs to 'l'"
 ```
 
@@ -1218,7 +1218,7 @@ git commit -m "feat: add quick/full plugin details popups, move logs to 'l'"
 ### Task 8: `ui.lua` — three tabs (All / Outdated / Disabled)
 
 **Files:**
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/pack/ui.lua`
 - Test: `tests/ui_spec.lua` (append)
 
 **Interfaces:**
@@ -1320,7 +1320,7 @@ In `M.open`, reset the tab to `"all"` whenever a fresh window is created (insert
 Add the `<Tab>` keymap alongside the others in `M.open`:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "<Tab>", "<Cmd>lua require('packui.ui').cycle_tab()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
 ```
 
 Replace the body of `M.update()`. The existing grouping/render_group logic is extracted into `render_all_tab`; two new render functions are added; `M.update` dispatches between them. Add these three local functions above `M.update`:
@@ -1481,7 +1481,7 @@ Expected: all `ui_spec.lua` tests pass, full suite 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/ui.lua tests/ui_spec.lua
+git add lua/pack/ui.lua tests/ui_spec.lua
 git commit -m "feat: add All/Outdated/Disabled dashboard tabs"
 ```
 
@@ -1490,7 +1490,7 @@ git commit -m "feat: add All/Outdated/Disabled dashboard tabs"
 ### Task 9: `ui.lua` — disable/enable toggle (`x`)
 
 **Files:**
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/pack/ui.lua`
 - Test: `tests/ui_spec.lua` (append)
 
 **Interfaces:**
@@ -1514,7 +1514,7 @@ Append to `tests/ui_spec.lua`:
       ui.toggle_disabled()
 
       assert.is_true(state.get_plugins()["foo.nvim"].disabled)
-      assert.is_true(require("packui.persist").load()["foo.nvim"])
+      assert.is_true(require("pack.persist").load()["foo.nvim"])
 
       ui.cycle_tab() -- all -> outdated
       ui.cycle_tab() -- outdated -> disabled
@@ -1537,7 +1537,7 @@ Append to `tests/ui_spec.lua`:
       ui.toggle_disabled()
 
       assert.is_false(state.get_plugins()["foo.nvim"].disabled)
-      assert.is_nil(require("packui.persist").load()["foo.nvim"])
+      assert.is_nil(require("pack.persist").load()["foo.nvim"])
     end)
   end)
 ```
@@ -1562,15 +1562,15 @@ function M.toggle_disabled()
   state.set_disabled(p.name, new_disabled)
 
   if new_disabled then
-    require("packui.loader").remove_triggers(p)
+    require("pack.loader").remove_triggers(p)
     if p.status == "loaded" then
       vim.notify(
-        "packui: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
+        "pack: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
         vim.log.levels.WARN
       )
     end
   else
-    require("packui.loader").enable(p)
+    require("pack.loader").enable(p)
   end
 
   M.update()
@@ -1580,7 +1580,7 @@ end
 Add the `x` keymap in `M.open`:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "x", "<Cmd>lua require('packui.ui').toggle_disabled()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -1591,7 +1591,7 @@ Expected: all `ui_spec.lua` tests pass, full suite 0 failures.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add lua/packui/ui.lua tests/ui_spec.lua
+git add lua/pack/ui.lua tests/ui_spec.lua
 git commit -m "feat: add disable/enable toggle (x) to dashboard"
 ```
 
@@ -1602,9 +1602,9 @@ git commit -m "feat: add disable/enable toggle (x) to dashboard"
 **Revised scope (user-requested mid-plan):** the Outdated tab must render each plugin the way Neovim's own built-in `vim.pack.update()` confirmation UI does — path, source, revision before/after, and the actual list of pending commits — not a single "N behind" line. This task now touches `state.lua` and `async.lua` in addition to `ui.lua`. It also fixes a gap found during Task 9's review: `async.lua`'s `M.sync()` doesn't skip `disabled` plugins, contradicting the design doc's "excluded from sync" guarantee.
 
 **Files:**
-- Modify: `lua/packui/state.lua`
-- Modify: `lua/packui/async.lua`
-- Modify: `lua/packui/ui.lua`
+- Modify: `lua/pack/state.lua`
+- Modify: `lua/pack/async.lua`
+- Modify: `lua/pack/ui.lua`
 - Test: `tests/state_spec.lua` (append), `tests/async_spec.lua` (append), `tests/ui_spec.lua` (append)
 
 **Interfaces:**
@@ -1690,7 +1690,7 @@ Expected: the two new `state_spec.lua` tests pass; full suite still green.
 Append to `tests/async_spec.lua`:
 
 ```lua
-describe("packui.async.parse_revision_pair", function()
+describe("pack.async.parse_revision_pair", function()
   it("splits two-line rev-parse output", function()
     local before, after = async.parse_revision_pair("abc123\ndef456\n")
     assert.equals("abc123", before)
@@ -1710,7 +1710,7 @@ describe("packui.async.parse_revision_pair", function()
   end)
 end)
 
-describe("packui.async.parse_upstream_branch_name", function()
+describe("pack.async.parse_upstream_branch_name", function()
   it("strips a single remote-name prefix", function()
     assert.equals("main", async.parse_upstream_branch_name("origin/main\n"))
   end)
@@ -1729,7 +1729,7 @@ describe("packui.async.parse_upstream_branch_name", function()
   end)
 end)
 
-describe("packui.async.parse_pending_commits", function()
+describe("pack.async.parse_pending_commits", function()
   it("splits multi-line git log output into a list", function()
     local commits = async.parse_pending_commits("abc123 │ fix: x\ndef456 │ feat: y")
     assert.same({ "abc123 │ fix: x", "def456 │ feat: y" }, commits)
@@ -1741,10 +1741,10 @@ describe("packui.async.parse_pending_commits", function()
   end)
 end)
 
-describe("packui.async.sync", function()
+describe("pack.async.sync", function()
   it("skips disabled plugins entirely", function()
-    local state = require("packui.state")
-    local persist = require("packui.persist")
+    local state = require("pack.state")
+    local persist = require("pack.persist")
     local tmp_path = vim.fn.tempname() .. "-disabled.json"
     persist._set_path_for_testing(tmp_path)
 
@@ -1837,8 +1837,8 @@ function M.check_outdated(plugin)
           return
         end
         state.set_behind(plugin.name, behind)
-        if package.loaded["packui.ui"] then
-          require("packui.ui").update()
+        if package.loaded["pack.ui"] then
+          require("pack.ui").update()
         end
 
         if behind == 0 then
@@ -1869,8 +1869,8 @@ function M.check_outdated(plugin)
                 upstream_branch = upstream_branch,
                 pending_commits = pending_commits,
               })
-              if package.loaded["packui.ui"] then
-                require("packui.ui").update()
+              if package.loaded["pack.ui"] then
+                require("pack.ui").update()
               end
               done()
             end)
@@ -1895,8 +1895,8 @@ In `M.update_plugin`, reset the behind-count and clear outdated-detail on a succ
         state.update_status(plugin.name, "error")
       end
       done()
-      if package.loaded["packui.ui"] then
-        require("packui.ui").update()
+      if package.loaded["pack.ui"] then
+        require("pack.ui").update()
       end
     end)
 ```
@@ -2005,7 +2005,7 @@ Append to `tests/ui_spec.lua`:
       local line = find_line(buf, "foo%.nvim")
       vim.api.nvim_win_set_cursor(0, { line, 0 })
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local called_with = nil
       local original = async.update_plugin
       async.update_plugin = function(p) called_with = p.name end
@@ -2025,7 +2025,7 @@ Append to `tests/ui_spec.lua`:
       local line = find_line(buf, "foo%.nvim")
       vim.api.nvim_win_set_cursor(0, { line, 0 })
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local called = false
       local original = async.update_plugin
       async.update_plugin = function() called = true end
@@ -2044,7 +2044,7 @@ Append to `tests/ui_spec.lua`:
       ui.open(config)
       ui.cycle_tab() -- all -> outdated
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local updated = {}
       local original = async.update_plugin
       async.update_plugin = function(p) table.insert(updated, p.name) end
@@ -2132,7 +2132,7 @@ function M.update_one()
   if not p then
     return
   end
-  require("packui.async").update_plugin(p)
+  require("pack.async").update_plugin(p)
 end
 
 function M.update_all_outdated()
@@ -2141,7 +2141,7 @@ function M.update_all_outdated()
   end
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      require("packui.async").update_plugin(p)
+      require("pack.async").update_plugin(p)
     end
   end
 end
@@ -2150,16 +2150,16 @@ end
 Add the `c`/`u`/`U` keymaps in `M.open`:
 
 ```lua
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "c", "<Cmd>lua require('packui.async').check_all_outdated()<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "u", "<Cmd>lua require('packui.ui').update_one()<CR>", opts)
-  vim.api.nvim_buf_set_keymap(buf_id, "n", "U", "<Cmd>lua require('packui.ui').update_all_outdated()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "u", "<Cmd>lua require('pack.ui').update_one()<CR>", opts)
+  vim.api.nvim_buf_set_keymap(buf_id, "n", "U", "<Cmd>lua require('pack.ui').update_all_outdated()<CR>", opts)
 ```
 
 At the end of `M.open` (after the initial `M.update()` call), trigger a background outdated check:
 
 ```lua
   M.update()
-  require("packui.async").check_all_outdated()
+  require("pack.async").check_all_outdated()
 ```
 
 - [ ] **Step 12: Run the tests to verify they pass**
@@ -2170,7 +2170,7 @@ Expected: all `ui_spec.lua`/`async_spec.lua`/`state_spec.lua` tests pass, full s
 - [ ] **Step 13: Commit**
 
 ```bash
-git add lua/packui/state.lua lua/packui/async.lua lua/packui/ui.lua tests/state_spec.lua tests/async_spec.lua tests/ui_spec.lua
+git add lua/pack/state.lua lua/pack/async.lua lua/pack/ui.lua tests/state_spec.lua tests/async_spec.lua tests/ui_spec.lua
 git commit -m "feat: rich per-plugin outdated display, recheck (c) and update keymaps (u/U)"
 ```
 
@@ -2190,7 +2190,7 @@ In `README.md`, replace:
 ```markdown
 ## ⌨️ Dashboard Keymaps
 
-When inside the dashboard (opened via `:Packui`), you can use the following keymaps:
+When inside the dashboard (opened via `:Pack`), you can use the following keymaps:
 
 *   `S` - Start a Sync operation (install/update).
 *   `<Enter>` - Show git output logs for the plugin under the cursor.
@@ -2202,7 +2202,7 @@ with:
 ```markdown
 ## ⌨️ Dashboard Keymaps
 
-When inside the dashboard (opened via `:Packui`), you can use the following keymaps:
+When inside the dashboard (opened via `:Pack`), you can use the following keymaps:
 
 *   `q` - Close the dashboard or any popup.
 *   `?` - Show the full keymap help popup.
@@ -2211,7 +2211,7 @@ When inside the dashboard (opened via `:Packui`), you can use the following keym
 *   `<Enter>` - Quick details for the plugin under the cursor.
 *   `K` - Full details (includes current commit) for the plugin under the cursor.
 *   `l` - Show git output logs for the plugin under the cursor.
-*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `packui-disabled.json` in your Neovim config directory; an already-loaded plugin needs a restart to fully unload.
+*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `pack-disabled.json` in your Neovim config directory; an already-loaded plugin needs a restart to fully unload.
 *   `c` - Check for outdated plugins (runs `git fetch` for every installed plugin).
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
@@ -2227,7 +2227,7 @@ git commit -m "docs: document new dashboard keymaps"
 
 - [ ] **Step 3: Manual verification checklist**
 
-Run: `nvim -u <your test init with packui configured and at least one real plugin>`, then `:Packui`, and exercise each of the following once (these depend on real git network access and can't be unit-tested):
+Run: `nvim -u <your test init with pack configured and at least one real plugin>`, then `:Pack`, and exercise each of the following once (these depend on real git network access and can't be unit-tested):
 
 1. Open dashboard, press `?` — help popup lists all keymaps, closes with `q`.
 2. Press `Enter` on a plugin — quick details shown, no delay.

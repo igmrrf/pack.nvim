@@ -16,4 +16,4 @@
 - Handle edge cases in `url:match("/([^/]+)$")` returning `nil` if there's no slash (e.g., malformed plugin name), defaulting to the full string to avoid a Lua crash.
 
 ## 4. Async improvements (async.lua)
-- Implement `sync` command safely without creating multiple overlapping sync queues if the user spams `:PackuiSync`. (Currently, it just queues them up again, which could result in double-pulls).
+- Implement `sync` command safely without creating multiple overlapping sync queues if the user spams `:Pack sync`. (Currently, it just queues them up again, which could result in double-pulls).

@@ -4,7 +4,7 @@ Date: 2026-07-23
 
 ## Problem
 
-The `:Packui` dashboard (`lua/packui/ui.lua`) currently supports only: close (`q`), sync (`S`), and a log popup (`Enter`). We need six additions: help/keymap popup, plugin detail view, continued log access, persisted enable/disable, outdated-plugin detection with update keymaps, and search. This spec covers all six as one unit since they share the same buffer, keymap surface, and state model.
+The `:Pack` dashboard (`lua/pack/ui.lua`) currently supports only: close (`q`), sync (`S`), and a log popup (`Enter`). We need six additions: help/keymap popup, plugin detail view, continued log access, persisted enable/disable, outdated-plugin detection with update keymaps, and search. This spec covers all six as one unit since they share the same buffer, keymap surface, and state model.
 
 ## Data model changes (`state.lua`)
 
@@ -16,12 +16,12 @@ Add three fields to the plugin record produced by `normalize()`:
 
 `M.init()` loads the disabled set from `persist.lua` and applies it to each plugin's `disabled` field after normalization.
 
-## New module: `packui/persist.lua`
+## New module: `pack/persist.lua`
 
 Pure I/O module, no UI dependency:
 
 ```lua
-M.path()            -- stdpath('config') .. '/packui-disabled.json'
+M.path()            -- stdpath('config') .. '/pack-disabled.json'
 M.load()            -- returns a set {[name]=true}; {} on missing/corrupt file (notify WARN on corrupt)
 M.save(set)          -- writes sorted array of names as JSON
 M.set_disabled(name, bool) -- read-modify-write convenience used by the UI toggle
@@ -130,7 +130,7 @@ Static floating buffer listing the full keymap table above (key, tab-scope, desc
 
 ## Error handling
 
-- Corrupt/unreadable `packui-disabled.json` → `vim.notify` WARN, treat as empty set, don't block `setup()`.
+- Corrupt/unreadable `pack-disabled.json` → `vim.notify` WARN, treat as empty set, don't block `setup()`.
 - git fetch/rev-list failure → `plugin.behind` stays `nil`, silently excluded from Outdated tab.
 - `git log -1` failure in full-details popup → show "(no commit info available)" line instead of erroring.
 
@@ -138,12 +138,12 @@ Static floating buffer listing the full keymap table above (key, tab-scope, desc
 
 No test infrastructure exists in this repo today. This spec adds one: **plenary.nvim**, busted-style (`describe`/`it`), run headless.
 
-- `tests/minimal_init.lua` — bootstraps a minimal runtimepath including plenary (cloned as a dev-only dependency, not a runtime dependency of packui) and this plugin.
+- `tests/minimal_init.lua` — bootstraps a minimal runtimepath including plenary (cloned as a dev-only dependency, not a runtime dependency of pack) and this plugin.
 - `tests/persist_spec.lua` — load/save round-trip, missing file → empty set, corrupt JSON → empty set + warning, `set_disabled` toggling.
 - `tests/state_spec.lua` — `normalize()` regression coverage plus new `disabled` field wiring from `persist.load()`.
 - `tests/async_spec.lua` — `parse_behind_count()` pure-function cases (well-formed count, empty/garbage output, negative/zero).
 - `tests/loader_spec.lua` — `setup_triggers()` registers `cmd`/`event`/`ft`/`keys` correctly for a fixture lazy plugin spec, and that calling it twice doesn't double-register.
-- `tests/ui_spec.lua` — headless-open `:Packui`, assert tab cycling changes buffer content, assert disabled plugins excluded from All tab and present in Disabled tab, assert Outdated tab filters on `behind`.
+- `tests/ui_spec.lua` — headless-open `:Pack`, assert tab cycling changes buffer content, assert disabled plugins excluded from All tab and present in Disabled tab, assert Outdated tab filters on `behind`.
 - A `Makefile` target `test`: `nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ {minimal_init = 'tests/minimal_init.lua'}"`.
 
-Manual verification checklist (for anything not practically unit-testable, e.g. actual git network fetch): open `:Packui` against a real plugin set, exercise every keymap in the table above once.
+Manual verification checklist (for anything not practically unit-testable, e.g. actual git network fetch): open `:Pack` against a real plugin set, exercise every keymap in the table above once.

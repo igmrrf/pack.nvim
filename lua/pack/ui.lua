@@ -1,4 +1,4 @@
-local state = require("packui.state")
+local state = require("pack.state")
 
 local M = {}
 
@@ -6,11 +6,12 @@ local win_id = nil
 local buf_id = nil
 local config_ref = nil
 local plugin_map = {}
-local ns_id = vim.api.nvim_create_namespace("packui")
+local ns_id = vim.api.nvim_create_namespace("pack")
 local expanded_plugins = {}
 
 local current_tab = "all"
 local TAB_ORDER = { "all", "outdated", "disabled" }
+local search_term = ""
 
 local function next_tab(tab)
   for i, t in ipairs(TAB_ORDER) do
@@ -22,9 +23,9 @@ local function next_tab(tab)
 end
 
 local FOOTER_BY_TAB = {
-  all = "  [S]ync  [x]disable  [Enter]toggle details  [Tab]next tab  [?]help  [q]uit",
-  outdated = "  [u]pdate one  [U]pdate all  [c]heck  [Enter]toggle details  [Tab]next tab  [?]help  [q]uit",
-  disabled = "  [x]enable  [Enter]toggle details  [Tab]next tab  [?]help  [q]uit",
+  all = "",
+  outdated = "",
+  disabled = "",
 }
 
 function M.cycle_tab()
@@ -39,9 +40,18 @@ function M.set_tab(index)
   end
 end
 
+function M.filter()
+  vim.ui.input({ prompt = "Filter Plugins: ", default = search_term }, function(input)
+    if input ~= nil then
+      search_term = input:lower()
+      M.update()
+    end
+  end)
+end
+
 local KEYMAP_HELP = {
   { key = "q", scope = "all", desc = "close" },
-  { key = "?", scope = "all", desc = "show this help" },
+  { key = "g?", scope = "all", desc = "show this help" },
   { key = "S", scope = "all", desc = "sync all (install missing, pull updates)" },
   { key = "Tab", scope = "all", desc = "cycle tabs" },
   { key = "1/2/3", scope = "all", desc = "go to tab 1/2/3 directly" },
@@ -52,6 +62,7 @@ local KEYMAP_HELP = {
   { key = "c", scope = "all", desc = "check for outdated plugins" },
   { key = "u", scope = "Outdated", desc = "update plugin" },
   { key = "U", scope = "Outdated", desc = "update all outdated plugins" },
+  { key = "/", scope = "all", desc = "filter plugins" },
 }
 
 local function open_popup(lines, opts)
@@ -88,11 +99,11 @@ local function open_popup(lines, opts)
 end
 
 function M.show_help()
-  local lines = { "  Packui Keymaps", "  ===============", "" }
+  local lines = { "  Pack Keymaps", "  ==============", "" }
   for _, entry in ipairs(KEYMAP_HELP) do
     table.insert(lines, string.format("  %-7s %-14s %s", entry.key, entry.scope, entry.desc))
   end
-  open_popup(lines, { close_keys = { "q", "?", "<Esc>" } })
+  open_popup(lines, { close_keys = { "q", "g?", "<Esc>" } })
 end
 
 local function plugin_at_cursor()
@@ -164,12 +175,12 @@ function M.toggle_disabled()
 
   if new_disabled then
     if p.status == "loaded" then
-      vim.notify("packui: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it", vim.log.levels.WARN)
+      vim.notify("pack: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it", vim.log.levels.WARN)
     else
-      require("packui.loader").remove_triggers(p)
+      require("pack.loader").remove_triggers(p)
     end
   else
-    require("packui.loader").enable(p)
+    require("pack.loader").enable(p)
   end
   M.update()
 end
@@ -177,14 +188,14 @@ end
 function M.update_one()
   if current_tab ~= "outdated" then return end
   local p = plugin_at_cursor()
-  if p then require("packui.async").update_plugin(p) end
+  if p then require("pack.async").update_plugin(p) end
 end
 
 function M.update_all_outdated()
   if current_tab ~= "outdated" then return end
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      require("packui.async").update_plugin(p)
+      require("pack.async").update_plugin(p)
     end
   end
 end
@@ -203,7 +214,7 @@ function M.open(config)
   vim.bo[buf_id].bufhidden = "wipe"
   vim.bo[buf_id].buftype = "nofile"
   vim.bo[buf_id].swapfile = false
-  vim.bo[buf_id].filetype = "packui"
+  vim.bo[buf_id].filetype = "pack"
   
   local width = math.floor(vim.o.columns * 0.8)
   local height = math.floor(vim.o.lines * 0.8)
@@ -223,22 +234,23 @@ function M.open(config)
   
   local opts = { buffer = buf_id, noremap = true, silent = true }
   vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
-  vim.keymap.set("n", "?", "<Cmd>lua require('packui.ui').show_help()<CR>", opts)
-  vim.keymap.set("n", "S", "<Cmd>PackuiSync<CR>", opts)
-  vim.keymap.set("n", "<CR>", "<Cmd>lua require('packui.ui').toggle_details()<CR>", opts)
-  vim.keymap.set("n", "K", "<Cmd>lua require('packui.ui').show_full_details()<CR>", opts)
-  vim.keymap.set("n", "l", "<Cmd>lua require('packui.ui').show_log()<CR>", opts)
-  vim.keymap.set("n", "<Tab>", "<Cmd>lua require('packui.ui').cycle_tab()<CR>", opts)
-  vim.keymap.set("n", "x", "<Cmd>lua require('packui.ui').toggle_disabled()<CR>", opts)
-  vim.keymap.set("n", "c", "<Cmd>lua require('packui.async').check_all_outdated()<CR>", opts)
-  vim.keymap.set("n", "u", "<Cmd>lua require('packui.ui').update_one()<CR>", opts)
-  vim.keymap.set("n", "U", "<Cmd>lua require('packui.ui').update_all_outdated()<CR>", opts)
-  vim.keymap.set("n", "1", "<Cmd>lua require('packui.ui').set_tab(1)<CR>", opts)
-  vim.keymap.set("n", "2", "<Cmd>lua require('packui.ui').set_tab(2)<CR>", opts)
-  vim.keymap.set("n", "3", "<Cmd>lua require('packui.ui').set_tab(3)<CR>", opts)
+  vim.keymap.set("n", "g?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
+  vim.keymap.set("n", "S", "<Cmd>Pack sync<CR>", opts)
+  vim.keymap.set("n", "<CR>", "<Cmd>lua require('pack.ui').toggle_details()<CR>", opts)
+  vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
+  vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
+  vim.keymap.set("n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
+  vim.keymap.set("n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
+  vim.keymap.set("n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
+  vim.keymap.set("n", "u", "<Cmd>lua require('pack.ui').update_one()<CR>", opts)
+  vim.keymap.set("n", "U", "<Cmd>lua require('pack.ui').update_all_outdated()<CR>", opts)
+  vim.keymap.set("n", "/", "<Cmd>lua require('pack.ui').filter()<CR>", opts)
+  vim.keymap.set("n", "1", "<Cmd>lua require('pack.ui').set_tab(1)<CR>", opts)
+  vim.keymap.set("n", "2", "<Cmd>lua require('pack.ui').set_tab(2)<CR>", opts)
+  vim.keymap.set("n", "3", "<Cmd>lua require('pack.ui').set_tab(3)<CR>", opts)
 
   M.update()
-  require("packui.async").check_all_outdated()
+  require("pack.async").check_all_outdated()
 end
 
 function M.show_log()
@@ -248,7 +260,7 @@ function M.show_log()
     return
   end
   local buf = open_popup(p.log, { wrap = true })
-  vim.bo[buf].filetype = "packui_log"
+  vim.bo[buf].filetype = "pack_log"
 end
 
 local function add_plugin_details(p, lines, highlights, indent)
@@ -268,8 +280,10 @@ local function render_all_tab(lines, highlights)
 
   for _, p in pairs(plugins) do
     if not p.disabled then
-      if groups[p.status] then table.insert(groups[p.status], p)
-      else table.insert(groups.installed, p) end
+      if search_term == "" or p.name:lower():match(search_term) then
+        if groups[p.status] then table.insert(groups[p.status], p)
+        else table.insert(groups.installed, p) end
+      end
     end
   end
 
@@ -308,7 +322,9 @@ local function render_outdated_tab(lines, highlights)
   local outdated = {}
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      table.insert(outdated, p)
+      if search_term == "" or p.name:lower():match(search_term) then
+        table.insert(outdated, p)
+      end
     end
   end
   table.sort(outdated, function(a, b) return a.name < b.name end)
@@ -359,7 +375,9 @@ local function render_disabled_tab(lines, highlights)
   local disabled = {}
   for _, p in pairs(state.get_plugins()) do
     if p.disabled then
-      table.insert(disabled, p)
+      if search_term == "" or p.name:lower():match(search_term) then
+        table.insert(disabled, p)
+      end
     end
   end
   table.sort(disabled, function(a, b) return a.name < b.name end)
@@ -395,6 +413,26 @@ function M.update()
   local highlights = {}
   plugin_map = {}
 
+  -- Header
+  local win_width = 80
+  if win_id and vim.api.nvim_win_is_valid(win_id) then
+    win_width = vim.api.nvim_win_get_width(win_id)
+  end
+
+  local title_str = " Pack.nvim "
+  local title_pad = math.max(0, math.floor((win_width - #title_str) / 2))
+  local title_line = string.rep(" ", title_pad) .. title_str
+
+  local help_str = "press g? for help"
+  local help_pad = math.max(0, math.floor((win_width - #help_str) / 2))
+  local help_line = string.rep(" ", help_pad) .. help_str
+
+  table.insert(lines, title_line)
+  table.insert(highlights, { line = #lines - 1, col_start = title_pad, col_end = title_pad + #title_str, hl = "Search" })
+  table.insert(lines, help_line)
+  table.insert(highlights, { line = #lines - 1, col_start = help_pad, col_end = help_pad + #help_str, hl = "Comment" })
+  table.insert(lines, "")
+
   -- Render Tab Bar
   local tab_line = "  "
   for i, tab in ipairs(TAB_ORDER) do
@@ -423,10 +461,6 @@ function M.update()
   else
     render_disabled_tab(lines, highlights)
   end
-
-  table.insert(lines, "")
-  table.insert(lines, FOOTER_BY_TAB[current_tab] or FOOTER_BY_TAB.all)
-  table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Comment" })
 
   vim.bo[buf_id].modifiable = true
   vim.api.nvim_buf_set_lines(buf_id, 0, -1, false, lines)

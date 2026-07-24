@@ -20,7 +20,7 @@ function M.load()
   local content = table.concat(lines, "\n")
   local ok, data = pcall(vim.json.decode, content)
   if not ok or type(data) ~= "table" then
-    vim.notify("packui: " .. lockfile_path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
+    vim.notify("pack: " .. lockfile_path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
     return {}
   end
   return data

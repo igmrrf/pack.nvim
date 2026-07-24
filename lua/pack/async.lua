@@ -1,4 +1,4 @@
-local state = require("packui.state")
+local state = require("pack.state")
 
 local M = {}
 
@@ -17,8 +17,8 @@ end
 local function process_queue()
   if active_jobs >= M.max_jobs or #queue == 0 then
     if active_jobs == 0 and #queue == 0 then
-      if package.loaded["packui.loader"] then
-        pcall(require("packui.loader").build_cache)
+      if package.loaded["pack.loader"] then
+        pcall(require("pack.loader").build_cache)
       end
     end
     return
@@ -133,11 +133,33 @@ function M.spawn(plugin, cmd, args, cwd, capture_output, on_exit)
   stderr:read_start(make_on_read(stderr, false))
 end
 
+local function run_build_hook(plugin, done_cb)
+  if not plugin.build then
+    return done_cb()
+  end
+  if type(plugin.build) == "function" then
+    vim.schedule(function()
+      local ok, err = pcall(plugin.build)
+      if not ok then vim.notify("pack: build hook failed for " .. plugin.name .. "\n" .. tostring(err), vim.log.levels.ERROR) end
+      done_cb()
+    end)
+  elseif type(plugin.build) == "string" then
+    M.spawn(plugin, "sh", { "-c", plugin.build }, plugin.dir, function(code)
+      if code ~= 0 then
+        vim.schedule(function() vim.notify("pack: build hook failed for " .. plugin.name .. " with code " .. tostring(code), vim.log.levels.ERROR) end)
+      end
+      done_cb()
+    end)
+  else
+    done_cb()
+  end
+end
+
 function M.install(plugin)
   table.insert(queue, function(done)
     state.update_status(plugin.name, "installing")
-    if package.loaded["packui.ui"] then
-      require("packui.ui").update()
+    if package.loaded["pack.ui"] then
+      require("pack.ui").update()
     end
     
     local parent_dir = vim.fn.fnamemodify(plugin.dir, ":h")
@@ -145,24 +167,26 @@ function M.install(plugin)
     
     M.spawn(plugin, "git", { "clone", "--depth", "1", plugin.url, plugin.dir }, nil, function(code)
       if code == 0 then
-        local lock = require("packui.lock")
+        local lock = require("pack.lock")
         local target_commit = lock.get_commit(plugin.name)
 
         local function finalize_install()
-          state.update_status(plugin.name, "installed")
-          if not plugin.lazy then
-            vim.schedule(function()
-              require("packui.loader").load(plugin.name)
-            end)
-          else
-            vim.schedule(function()
-              require("packui.loader").setup_triggers(plugin)
-            end)
-          end
-          done()
-          if package.loaded["packui.ui"] then
-            require("packui.ui").update()
-          end
+          run_build_hook(plugin, function()
+            state.update_status(plugin.name, "installed")
+            if not plugin.lazy then
+              vim.schedule(function()
+                require("pack.loader").load(plugin.name)
+              end)
+            else
+              vim.schedule(function()
+                require("pack.loader").setup_triggers(plugin)
+              end)
+            end
+            done()
+            if package.loaded["pack.ui"] then
+              require("pack.ui").update()
+            end
+          end)
         end
 
         if target_commit then
@@ -183,8 +207,8 @@ function M.install(plugin)
       else
         state.update_status(plugin.name, "error")
         done()
-        if package.loaded["packui.ui"] then
-          require("packui.ui").update()
+        if package.loaded["pack.ui"] then
+          require("pack.ui").update()
         end
       end
     end)
@@ -196,8 +220,8 @@ function M.update_plugin(plugin)
   local was_loaded = plugin.status == "loaded"
   table.insert(queue, function(done)
     state.update_status(plugin.name, "updating")
-    if package.loaded["packui.ui"] then
-      require("packui.ui").update()
+    if package.loaded["pack.ui"] then
+      require("pack.ui").update()
     end
 
     M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
@@ -206,22 +230,24 @@ function M.update_plugin(plugin)
           if rev_code == 0 and output then
             local hash = output:match("([^\r\n]+)")
             if hash then
-              require("packui.lock").set_commit(plugin.name, hash, plugin.url)
+              require("pack.lock").set_commit(plugin.name, hash, plugin.url)
             end
           end
-          state.update_status(plugin.name, was_loaded and "loaded" or "installed")
-          state.set_behind(plugin.name, 0)
-          state.set_outdated_detail(plugin.name, {})
-          done()
-          if package.loaded["packui.ui"] then
-            require("packui.ui").update()
-          end
+          run_build_hook(plugin, function()
+            state.update_status(plugin.name, was_loaded and "loaded" or "installed")
+            state.set_behind(plugin.name, 0)
+            state.set_outdated_detail(plugin.name, {})
+            done()
+            if package.loaded["pack.ui"] then
+              require("pack.ui").update()
+            end
+          end)
         end)
       else
         state.update_status(plugin.name, "error")
         done()
-        if package.loaded["packui.ui"] then
-          require("packui.ui").update()
+        if package.loaded["pack.ui"] then
+          require("pack.ui").update()
         end
       end
     end)
@@ -283,8 +309,8 @@ function M.check_outdated(plugin)
       if fetch_code ~= 0 then
         state.update_status(plugin.name, "error")
         state.set_outdated_detail(plugin.name, { error = "Upstream fetch failed" })
-        if package.loaded["packui.ui"] then
-          require("packui.ui").update()
+        if package.loaded["pack.ui"] then
+          require("pack.ui").update()
         end
         done()
         return
@@ -300,8 +326,8 @@ function M.check_outdated(plugin)
           return
         end
         state.set_behind(plugin.name, behind)
-        if package.loaded["packui.ui"] then
-          require("packui.ui").update()
+        if package.loaded["pack.ui"] then
+          require("pack.ui").update()
         end
 
         if behind == 0 then
@@ -339,8 +365,8 @@ function M.check_outdated(plugin)
                 upstream_branch = upstream_branch,
                 pending_commits = pending_commits,
               })
-              if package.loaded["packui.ui"] then
-                require("packui.ui").update()
+              if package.loaded["pack.ui"] then
+                require("pack.ui").update()
               end
               done()
             end)
@@ -390,11 +416,11 @@ function M.restore()
     elseif p.status == "installing" or p.status == "updating" or p.status == "missing" then
       -- skip
     else
-      local target_commit = require("packui.lock").get_commit(p.name)
+      local target_commit = require("pack.lock").get_commit(p.name)
       if target_commit then
         table.insert(queue, function(done)
           state.update_status(p.name, "updating")
-          if package.loaded["packui.ui"] then require("packui.ui").update() end
+          if package.loaded["pack.ui"] then require("pack.ui").update() end
 
           M.spawn(p, "git", { "fetch", "origin", target_commit }, p.dir, function()
             M.spawn(p, "git", { "checkout", target_commit }, p.dir, function(code)
@@ -406,7 +432,7 @@ function M.restore()
                 state.update_status(p.name, "error")
               end
               done()
-              if package.loaded["packui.ui"] then require("packui.ui").update() end
+              if package.loaded["pack.ui"] then require("pack.ui").update() end
             end)
           end)
         end)

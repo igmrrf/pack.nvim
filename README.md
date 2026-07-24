@@ -1,44 +1,84 @@
-# 📦 Pack UI
+# 📦 pack.nvim
 
 A modern, high-performance Neovim plugin manager that leverages Neovim's built-in native package management (`:help packages`, `vim.pack`) while providing a rich, interactive, floating-window UI.
 
-Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **Pack UI** focuses on developer experience with a beautiful dashboard, non-blocking asynchronous git operations, and real-time log streaming.
+Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nvim** focuses on developer experience with a beautiful dashboard, non-blocking asynchronous git operations, and real-time log streaming.
 
 ## ✨ Features
 
-* **Native Backend:** Exclusively uses `~/.local/share/nvim/site/pack/packui/opt`. Every plugin (lazy or not) is `packadd`-ed explicitly through packui rather than relying on Neovim's native `start/` auto-load, which only scans 'packpath' entries that existed *before* `setup()` ever runs.
+* **Native Backend:** Exclusively uses `~/.local/share/nvim/site/pack/pack/opt`. Every plugin (lazy or not) is `packadd`-ed explicitly through pack rather than relying on Neovim's native `start/` auto-load, which only scans 'packpath' entries that existed *before* `setup()` ever runs.
 * **Async Git Operations:** Non-blocking `git clone` and `git pull` utilizing `vim.uv` (libuv) with safe concurrency limits.
-* **Rich Dashboard UI:** A centralized floating window showing real-time plugin statuses.
-* **Log Streaming:** Press `<CR>` on any installing or updating plugin to view real-time `stdout` and `stderr` logs in a floating split.
+* **Interactive UI Dashboard:** A centralized floating window showing real-time plugin statuses, log streaming, and lockfile diffs.
+* **Lockfile Support:** Generates and respects `nvim-pack-lock.json` to ensure reproducible plugin installations across machines.
+* **Persistent States:** Disabling a plugin is persisted to `pack-disabled.json` without needing to modify your raw Lua configuration.
+* **Performance Caching:** Pre-compiles all lazy-loaded `ftdetect` files into a single cache block to avoid synchronous I/O blocks during Neovim startup.
 * **Lazy Loading:** Seamlessly supports `cmd`, `event`, `ft` (filetype), and `keys` (keymap) triggers to dynamically load plugins right when you need them.
+
+## 🚀 Advanced Features
+
+### Dependency Management
+Define dependencies that will be automatically installed and loaded before your main plugin.
+```lua
+{
+  "nvim-telescope/telescope.nvim",
+  dependencies = { "nvim-lua/plenary.nvim" }
+}
+```
+
+### Post-Install & Build Hooks
+Run custom build commands or Lua functions after a plugin is installed or updated.
+```lua
+{
+  "nvim-telescope/telescope-fzf-native.nvim",
+  build = "make"
+}
+```
+
+### Local Plugin Support
+Develop plugins locally without needing a remote repository.
+```lua
+{
+  "my-local-plugin",
+  dir = "~/projects/my-local-plugin"
+}
+```
+
+### Startup Profiling
+Debug slow startup times by viewing precisely how long each plugin took to load during initialization using the `:Pack profile` command.
+
+### Lockfile Diffs & Commit Histories
+After `:Pack sync`, the UI visually diffs the lockfile changes, displaying the exact pending commits before you update.
+
+### Dashboard Filtering
+Easily search through a massive plugin list by typing `/` to filter the Pack dashboard in real-time.
 
 ## 🚀 Installation & Bootstrapping
 
-Pack UI is designed to manage itself. Add this bootstrap snippet to the very top of your `init.lua`:
+pack.nvim is designed to manage itself. Add this bootstrap snippet to the very top of your `init.lua`:
 
 ```lua
-local packui_path = vim.fn.stdpath("data") .. "/site/pack/packui/opt/vimpack"
+local pack_path = vim.fn.stdpath("data") .. "/site/pack/pack/opt/pack.nvim"
 
--- Automatically clone Pack UI if it's not installed
-if not vim.uv.fs_stat(packui_path) then
+-- Automatically clone pack.nvim if it's not installed
+if not vim.uv.fs_stat(pack_path) then
   vim.fn.system({
     "git",
     "clone",
     "--filter=blob:none",
-    "https://github.com/igmrrf/vimpack.git",
+    "https://github.com/igmrrf/pack.nvim.git",
     "--branch=main",
-    packui_path,
+    pack_path,
   })
   
   -- Add to runtime path on the very first run
-  vim.opt.rtp:prepend(packui_path)
+  vim.opt.rtp:prepend(pack_path)
 end
 
--- Initialize Pack UI
-require("packui").setup({
+-- Initialize pack.nvim
+require("pack").setup({
   plugins = {
-    -- Let Pack UI manage itself!
-    { "igmrrf/vimpack" },
+    -- Let pack.nvim manage itself!
+    { "igmrrf/pack.nvim" },
 
     -- Example: Auto-loaded dependency
     { "nvim-lua/plenary.nvim" },
@@ -90,12 +130,12 @@ require("packui").setup({
 ### Adopting existing `vim.pack` plugins
 
 `vim.pack` always installs into `<stdpath("data")>/site/pack/core/opt/<name>`, deriving `<name>` from
-the repo's basename — the exact same `pack/<group>/opt/<name>` layout Pack UI uses. Point `install_path`
-at that same directory and Pack UI recognizes every already-installed plugin as `installed` immediately,
+the repo's basename — the exact same `pack/<group>/opt/<name>` layout pack.nvim uses. Point `install_path`
+at that same directory and pack.nvim recognizes every already-installed plugin as `installed` immediately,
 with no re-clone:
 
 ```lua
-require("packui").setup({
+require("pack").setup({
   install_path = vim.fn.stdpath("data") .. "/site/pack/core",
   plugins = {
     { "nvim-lua/plenary.nvim" }, -- already on disk from vim.pack.add() -> just gets packadd'd
@@ -103,15 +143,15 @@ require("packui").setup({
 })
 ```
 
-Make sure nothing else still calls `vim.pack.add()`/`vim.pack.update()` for the same plugins once Pack
-UI is managing them — both would otherwise try to install/update the same directories.
+Make sure nothing else still calls `vim.pack.add()`/`vim.pack.update()` for the same plugins once pack.nvim
+is managing them — both would otherwise try to install/update the same directories.
 
 ### Bulk keymaps
 
-`require("packui").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
+`require("pack").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
 
 ```lua
-require("packui").map_keys({
+require("pack").map_keys({
   { "<leader>e", "<cmd>Oil<cr>", desc = "Open Oil" },
   { "<leader>gg", function() require("snacks").lazygit() end, desc = "Lazygit", mode = { "n", "v" } },
 })
@@ -121,12 +161,13 @@ require("packui").map_keys({
 
 | Command | Description |
 |---|---|
-| `:Packui` | Opens the interactive dashboard UI to view current plugin status. |
-| `:PackuiSync` | Installs missing plugins and updates existing plugins using parallel async workers. |
+| `:Pack` | Opens the interactive dashboard UI to view current plugin status. |
+| `:Pack sync` | Installs missing plugins and updates existing plugins using parallel async workers. |
+| `:Pack profile` | Displays the startup profile showing plugin load times. |
 
 ## ⌨️ Dashboard Keymaps
 
-When inside the dashboard (opened via `:Packui`), you can use the following keymaps:
+When inside the dashboard (opened via `:Pack`), you can use the following keymaps:
 
 *   `q` - Close the dashboard or any popup.
 *   `?` - Show the full keymap help popup.
@@ -135,7 +176,7 @@ When inside the dashboard (opened via `:Packui`), you can use the following keym
 *   `<Enter>` - Quick details for the plugin under the cursor.
 *   `K` - Full details (includes current commit) for the plugin under the cursor.
 *   `l` - Show git output logs for the plugin under the cursor.
-*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `packui-disabled.json` in your Neovim config directory (a plain JSON array of plugin names, e.g. `["foo.nvim", "bar.nvim"]` — safe to hand-edit); an already-loaded plugin needs a restart to fully unload.
+*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). Disabling persists to `pack-disabled.json` in your Neovim config directory (a plain JSON array of plugin names, e.g. `["foo.nvim", "bar.nvim"]` — safe to hand-edit); an already-loaded plugin needs a restart to fully unload.
 *   `c` - Check for outdated plugins (runs `git fetch` for every installed plugin).
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
@@ -146,7 +187,7 @@ When inside the dashboard (opened via `:Packui`), you can use the following keym
 You can override the default UI settings in your `.setup()` function:
 
 ```lua
-require("packui").setup({
+require("pack").setup({
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
     icons = {

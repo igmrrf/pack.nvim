@@ -14,7 +14,7 @@ Unlike traditional native pack managers (which are often strictly CLI-based like
 
 ## 3. Directory Structure
 ```lua
-~/.local/share/nvim/site/pack/packui/
+~/.local/share/nvim/site/pack/pack/
 ├── start/
 │   ├── plenary.nvim/    # Auto-loaded on startup
 │   └── telescope.nvim/  # Auto-loaded on startup
@@ -27,9 +27,9 @@ Unlike traditional native pack managers (which are often strictly CLI-based like
 The user configuration should be declarative:
 
 ```lua
-require("packui").setup({
+require("pack").setup({
   -- The directory where plugins will be installed
-  install_path = vim.fn.stdpath("data") .. "/site/pack/packui",
+  install_path = vim.fn.stdpath("data") .. "/site/pack/pack",
   
   -- The plugins to install
   plugins = {
@@ -89,7 +89,7 @@ Interacts with native vim functionality.
 
 ## 6. Implementation Roadmap
 
-*   **Phase 1: Core Logic.** Write the declarative spec parser and the `git` async wrapper to clone repositories into `pack/packui/start`.
+*   **Phase 1: Core Logic.** Write the declarative spec parser and the `git` async wrapper to clone repositories into `pack/pack/start`.
 *   **Phase 2: Basic UI.** Create the floating window and list the plugins. Implement basic keymaps to trigger the install/update jobs and stream `stdout` to a split window.
 *   **Phase 3: Polishing the UI.** Implement custom highlights, icons, grouping (Loaded vs Unloaded), and a split-view detail pane (like lazy.nvim) for viewing commit logs.
 *   **Phase 4: Lazy Loading Engine.** Implement the logic to place plugins in `opt/`, intercept Vim events (like `CmdlineEnter` or `FileType`), and seamlessly execute `packadd`.
