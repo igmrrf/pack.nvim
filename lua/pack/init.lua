@@ -162,6 +162,10 @@ function M.setup(opts)
   state.init(M.config)
   loader.init(M.config)
 
+  -- Register build hooks BEFORE installing so PackChanged(install) events from
+  -- the initial add() are caught.
+  require("pack.async").setup_build_hooks()
+
   -- Install (native) + load (ours) every configured plugin. confirm=false so
   -- startup installs run silently rather than prompting.
   M._install_and_load(collect_native_specs(state.get_plugins()), false)
