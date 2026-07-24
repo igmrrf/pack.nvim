@@ -227,6 +227,17 @@ function M.reconcile_from_native(native_pack)
   if not ok or type(list) ~= "table" then
     return
   end
+
+  -- A plugin native itself packadd-ed (e.g. pack.nvim bootstrapped via
+  -- vim.pack.add before setup) is already active on 'runtimepath' but never
+  -- went through our load_fn -- native's pack_add returns early for plugins
+  -- already in its active set, so our loader never marks it "loaded". Detect
+  -- that via runtimepath membership so the dashboard reports it correctly.
+  local rtp = {}
+  for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+    rtp[vim.fs.normalize(path)] = true
+  end
+
   for _, entry in ipairs(list) do
     local name = entry.spec and entry.spec.name
     local p = name and M.plugins[name]
@@ -235,6 +246,9 @@ function M.reconcile_from_native(native_pack)
       p.rev = entry.rev or p.rev
       if p.status == "missing" then
         p.status = "installed"
+      end
+      if p.status == "installed" and p.dir and rtp[vim.fs.normalize(p.dir)] then
+        p.status = "loaded"
       end
     end
   end
