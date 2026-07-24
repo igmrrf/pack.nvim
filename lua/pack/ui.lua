@@ -13,6 +13,51 @@ local current_tab = "all"
 local TAB_ORDER = { "all", "outdated", "disabled" }
 local search_term = ""
 
+-- Single dashboard-wide loading spinner. A repeating timer advances the frame
+-- and repaints while any task is in-flight, then stops itself. All async work
+-- (outdated checks, updates, installs) shares this one animation rather than
+-- each spinning on its own.
+local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local spinner_idx = 1
+local spinner_timer = nil
+
+-- Is there any work worth animating? Deterministic busy checks OR a plugin
+-- mid-install/update. Self-correcting: statuses reset on completion.
+local function work_in_progress()
+  if package.loaded["pack.async"] and require("pack.async").is_busy() then
+    return true
+  end
+  for _, p in pairs(state.get_plugins()) do
+    if p.status == "updating" or p.status == "installing" then
+      return true
+    end
+  end
+  return false
+end
+
+local function stop_spinner()
+  if spinner_timer then
+    pcall(vim.fn.timer_stop, spinner_timer)
+    spinner_timer = nil
+  end
+end
+
+-- Start the spinner timer if it isn't already running and the dashboard is open.
+function M.ensure_spinner()
+  if spinner_timer then return end
+  if not (buf_id and vim.api.nvim_buf_is_valid(buf_id)) then return end
+  spinner_timer = vim.fn.timer_start(100, function()
+    -- Dashboard closed or work done: stop and do a final clean repaint.
+    if not (buf_id and vim.api.nvim_buf_is_valid(buf_id)) or not work_in_progress() then
+      stop_spinner()
+      M.update()
+      return
+    end
+    spinner_idx = (spinner_idx % #SPINNER_FRAMES) + 1
+    M.update()
+  end, { ["repeat"] = -1 })
+end
+
 local function next_tab(tab)
   for i, t in ipairs(TAB_ORDER) do
     if t == tab then
@@ -376,7 +421,8 @@ local function render_outdated_tab(lines, highlights)
 
   for _, p in ipairs(outdated) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-    table.insert(lines, string.format("    %s %s %s — %d behind", expand_icon, config_ref.ui.icons.sync, p.name, p.behind))
+    local suffix = (p.status == "updating") and "updating…" or (p.behind .. " behind")
+    table.insert(lines, string.format("    %s %s %s — %s", expand_icon, config_ref.ui.icons.sync, p.name, suffix))
     plugin_map[#lines] = p
     table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
     table.insert(highlights, { line = #lines - 1, col_start = 8, col_end = 8 + #config_ref.ui.icons.sync, hl = "DiagnosticWarn" })
@@ -470,7 +516,20 @@ function M.update()
   table.insert(highlights, { line = #lines - 1, col_start = title_pad, col_end = title_pad + #title_str, hl = "Search" })
   table.insert(lines, help_line)
   table.insert(highlights, { line = #lines - 1, col_start = help_pad, col_end = help_pad + #help_str, hl = "Comment" })
-  table.insert(lines, "")
+
+  -- Busy line: one shared spinner for whatever async work is running.
+  if work_in_progress() then
+    local updating = false
+    for _, p in pairs(state.get_plugins()) do
+      if p.status == "updating" then updating = true break end
+    end
+    local status_str = SPINNER_FRAMES[spinner_idx] .. " " .. (updating and "updating…" or "checking for updates…")
+    local status_pad = math.max(0, math.floor((win_width - vim.fn.strdisplaywidth(status_str)) / 2))
+    table.insert(lines, string.rep(" ", status_pad) .. status_str)
+    table.insert(highlights, { line = #lines - 1, col_start = status_pad, col_end = -1, hl = "DiagnosticWarn" })
+  else
+    table.insert(lines, "")
+  end
 
   -- Render Tab Bar
   local tab_line = "  "
