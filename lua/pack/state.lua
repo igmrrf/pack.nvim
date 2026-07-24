@@ -9,6 +9,12 @@ M.plugins = {}
 -- this to know when to rebuild instead of rescanning on every lookup.
 M.generation = 0
 
+-- Directory native vim.pack installs plugins into (fixed, not configurable):
+-- stdpath('data')/site/pack/core/opt.
+function M.native_opt_dir()
+  return vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
+end
+
 -- Derive the require() module name from a plugin name when `main` isn't set,
 -- following the common "<module>.nvim" repo naming convention.
 local function default_main(name)
@@ -39,19 +45,26 @@ local function normalize(plugin, config)
   if type(enabled) == "function" then enabled = enabled() end
   if enabled == false then return nil end
 
-  local url = plugin[1]
+  -- Accept both pack.nvim shorthand (url at [1]) and native vim.pack.Spec style
+  -- (`src=`). Handling it here means dependencies written either way normalize
+  -- too, and `src=` specs keep every pack.nvim field (lazy/event/opts/...).
+  local url = plugin[1] or plugin.src
   if type(url) ~= "string" or url == "" then
     return nil
   end
 
   local match_name = url:match("/([^/]+)$")
-  local name = plugin.as or (match_name and match_name or url)
+  local name = plugin.as or plugin.name or (match_name and match_name or url)
   if name:sub(-4) == ".git" then
     name = name:sub(1, -5)
   end
   
+  -- Treat full URLs, scp-style git remotes, file:// URLs, and absolute/home
+  -- local paths as-is; only bare "owner/repo" shorthand expands to GitHub.
   local full_url = url
-  if not (url:match("^https?://") or url:match("^git@")) then
+  if url:match("^~") then
+    full_url = vim.fn.expand(url)
+  elseif not (url:match("^%w[%w+.-]*://") or url:match("^git@") or url:match("^/")) then
     full_url = "https://github.com/" .. url
   end
   
@@ -76,6 +89,7 @@ local function normalize(plugin, config)
     event = plugin.event,
     ft = plugin.ft,
     keys = plugin.keys,
+    pattern = plugin.pattern,
     main = plugin.main,
     opts = plugin.opts,
     config = config_fn,
@@ -130,30 +144,17 @@ function M.add_plugin(p, config)
     end
     
     norm.disabled = disabled_set[norm.name] or false
-    norm.dir = config.install_path .. "/opt/" .. norm.name
-    
-    if norm.local_dir then
-      norm.local_dir = vim.fn.expand(norm.local_dir)
-      if vim.fn.isdirectory(norm.dir) == 0 then
-        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
-        vim.fn.mkdir(parent_dir, "p")
-        pcall(vim.uv.fs_symlink, norm.local_dir, norm.dir, { dir = true })
-      end
-    else
-      local legacy_start_dir = config.install_path .. "/start/" .. norm.name
-      if vim.fn.isdirectory(norm.dir) == 0 and vim.fn.isdirectory(legacy_start_dir) == 1 then
-        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
-        vim.fn.mkdir(parent_dir, "p")
-        vim.fn.rename(legacy_start_dir, norm.dir)
-      end
-    end
-    
+    -- Native vim.pack owns the install location; this is the authoritative path
+    -- it will use. load_fn / reconcile_from_native confirm it post-install, but
+    -- computing it here lets us show an accurate status before add() runs.
+    norm.dir = M.native_opt_dir() .. "/" .. norm.name
+
     if vim.fn.isdirectory(norm.dir) == 1 then
       norm.status = "installed"
     else
       norm.status = "missing"
     end
-    
+
     M.plugins[norm.name] = norm
     table.insert(added_list, norm)
     ::continue::
@@ -216,6 +217,94 @@ function M.set_outdated_detail(name, detail)
   p.revision_after = detail.revision_after
   p.upstream_branch = detail.upstream_branch
   p.pending_commits = detail.pending_commits
+end
+
+-- Refresh installed-status / on-disk path / recorded revision from what native
+-- vim.pack actually has. load_fn already reconciles on add; this is for the
+-- dashboard to reflect installs/updates that happened via native afterwards.
+function M.reconcile_from_native(native_pack)
+  if not (native_pack and native_pack.get) then
+    return
+  end
+  local ok, list = pcall(native_pack.get)
+  if not ok or type(list) ~= "table" then
+    return
+  end
+
+  -- A plugin native itself packadd-ed (e.g. pack.nvim bootstrapped via
+  -- vim.pack.add before setup) is already active on 'runtimepath' but never
+  -- went through our load_fn -- native's pack_add returns early for plugins
+  -- already in its active set, so our loader never marks it "loaded". Detect
+  -- that via runtimepath membership so the dashboard reports it correctly.
+  local rtp = {}
+  for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+    rtp[vim.fs.normalize(path)] = true
+  end
+
+  for _, entry in ipairs(list) do
+    local name = entry.spec and entry.spec.name
+    local p = name and M.plugins[name]
+    if p then
+      p.dir = entry.path or p.dir
+      p.rev = entry.rev or p.rev
+      if p.status == "missing" then
+        p.status = "installed"
+      end
+      if p.status == "installed" and p.dir and rtp[vim.fs.normalize(p.dir)] then
+        p.status = "loaded"
+      end
+    end
+  end
+end
+
+-- Resolve a pack.nvim plugin's pin fields to native vim.pack's single
+-- `version`. Precedence: commit > tag > branch > version/sem_version range.
+-- A range string ("^1.0", ">=0.5") becomes a vim.version range object; a plain
+-- ref (branch/tag/sha) is passed through as a string, which native accepts.
+local function resolve_version(p)
+  if p.commit then return p.commit end
+  if p.tag then return p.tag end
+  if p.branch then return p.branch end
+  local range_str = p.version or p.sem_version
+  if range_str == nil then return nil end
+  if type(range_str) == "table" then
+    return range_str
+  end
+  local ok, range = pcall(vim.version.range, range_str)
+  if ok then return range end
+  vim.notify(
+    ("pack: '%s' has an invalid version range '%s', ignoring"):format(p.name, tostring(range_str)),
+    vim.log.levels.WARN
+  )
+  return nil
+end
+
+-- Translate an internal normalized plugin into a native vim.pack spec. All the
+-- lazy-loading / config metadata native has no concept of is stashed under
+-- `data`, which round-trips through vim.pack.get() and PackChanged payloads
+-- (functions survive vim.deepcopy by reference).
+function M.to_native_spec(p)
+  return {
+    src = p.url,
+    name = p.name,
+    version = resolve_version(p),
+    data = {
+      lazy = p.lazy,
+      event = p.event,
+      ft = p.ft,
+      cmd = p.cmd,
+      keys = p.keys,
+      pattern = p.pattern,
+      config = p.config,
+      opts = p.opts,
+      build = p.build,
+      init = p.init_hook,
+      cond = p.cond,
+      priority = p.priority,
+      main = p.main,
+      dependencies = p.dependencies,
+    },
+  }
 end
 
 return M

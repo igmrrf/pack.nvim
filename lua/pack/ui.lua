@@ -13,6 +13,61 @@ local current_tab = "all"
 local TAB_ORDER = { "all", "outdated", "disabled" }
 local search_term = ""
 
+-- Single dashboard-wide loading spinner. A repeating timer advances the frame
+-- and repaints while any task is in-flight, then stops itself. All async work
+-- (outdated checks, updates, installs) shares this one animation rather than
+-- each spinning on its own.
+local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local spinner_idx = 1
+local spinner_timer = nil
+
+-- Is there any work worth animating? Deterministic busy checks OR a plugin
+-- mid-install/update. Self-correcting: statuses reset on completion.
+local function work_in_progress()
+  if package.loaded["pack.async"] and require("pack.async").is_busy() then
+    return true
+  end
+  for _, p in pairs(state.get_plugins()) do
+    if p.status == "updating" or p.status == "installing" then
+      return true
+    end
+  end
+  return false
+end
+
+local function stop_spinner()
+  if spinner_timer then
+    pcall(vim.fn.timer_stop, spinner_timer)
+    spinner_timer = nil
+  end
+end
+
+-- Start the spinner timer if it isn't already running and the dashboard is open.
+function M.ensure_spinner()
+  if spinner_timer then return end
+  if not (buf_id and vim.api.nvim_buf_is_valid(buf_id)) then return end
+  spinner_timer = vim.fn.timer_start(100, function()
+    -- Dashboard closed or work done: stop and do a final clean repaint.
+    if not (buf_id and vim.api.nvim_buf_is_valid(buf_id)) or not work_in_progress() then
+      stop_spinner()
+      M.update()
+      return
+    end
+    spinner_idx = (spinner_idx % #SPINNER_FRAMES) + 1
+    M.update()
+    -- Native vim.pack.update() blocks the main loop in vim.wait(): our timer
+    -- still fires and repaints the buffer, but Neovim won't flush the screen
+    -- until the wait yields. Force a redraw so the spinner actually animates
+    -- while an update is in flight (native does the same for its own progress).
+    for _, p in pairs(state.get_plugins()) do
+      if p.status == "updating" then
+        pcall(vim.cmd, "redraw")
+        break
+      end
+    end
+  end, { ["repeat"] = -1 })
+end
+
 local function next_tab(tab)
   for i, t in ipairs(TAB_ORDER) do
     if t == tab then
@@ -58,6 +113,7 @@ local KEYMAP_HELP = {
   { key = "Enter", scope = "all", desc = "toggle inline details for plugin" },
   { key = "K", scope = "all", desc = "full details (commit info) in popup" },
   { key = "l", scope = "all", desc = "view install/update logs" },
+  { key = "p", scope = "all", desc = "show startup profile (load times)" },
   { key = "x", scope = "All, Disabled", desc = "toggle disable/enable" },
   { key = "c", scope = "all", desc = "check for outdated plugins" },
   { key = "u", scope = "Outdated", desc = "update plugin" },
@@ -94,6 +150,22 @@ local function open_popup(lines, opts)
   for _, key in ipairs(opts.close_keys or { "q", "<Esc>" }) do
     vim.keymap.set("n", key, "<Cmd>close<CR>", { buffer = buf, noremap = true, silent = true })
   end
+
+  vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if not vim.api.nvim_win_is_valid(win) then
+        return true
+      end
+      local w = math.floor(vim.o.columns * (opts.width_pct or 0.6))
+      local h = math.min(#lines + 2, math.floor(vim.o.lines * (opts.height_pct or 0.6)))
+      vim.api.nvim_win_set_config(win, {
+        width = w,
+        height = h,
+        row = math.floor((vim.o.lines - h) / 2),
+        col = math.floor((vim.o.columns - w) / 2),
+      })
+    end,
+  })
 
   return buf, win
 end
@@ -193,15 +265,21 @@ end
 
 function M.update_all_outdated()
   if current_tab ~= "outdated" then return end
+  local names = {}
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      require("pack.async").update_plugin(p)
+      table.insert(names, p.name)
     end
   end
+  require("pack.async").update_plugins(names)
 end
 
 function M.open(config)
   config_ref = config
+  -- Refresh status/path/rev from native vim.pack before rendering.
+  pcall(function()
+    state.reconcile_from_native(require("pack").native_pack)
+  end)
   if win_id and vim.api.nvim_win_is_valid(win_id) then
     vim.api.nvim_set_current_win(win_id)
     return
@@ -232,6 +310,24 @@ function M.open(config)
     style = "minimal"
   })
   
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = vim.api.nvim_create_augroup("pack_ui_resize", { clear = true }),
+    callback = function()
+      if not win_id or not vim.api.nvim_win_is_valid(win_id) then
+        return true
+      end
+      local w = math.floor(vim.o.columns * 0.8)
+      local h = math.floor(vim.o.lines * 0.8)
+      vim.api.nvim_win_set_config(win_id, {
+        width = w,
+        height = h,
+        row = math.floor((vim.o.lines - h) / 2),
+        col = math.floor((vim.o.columns - w) / 2),
+      })
+      M.update()
+    end,
+  })
+  
   local opts = { buffer = buf_id, noremap = true, silent = true }
   vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
   vim.keymap.set("n", "g?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
@@ -239,6 +335,7 @@ function M.open(config)
   vim.keymap.set("n", "<CR>", "<Cmd>lua require('pack.ui').toggle_details()<CR>", opts)
   vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
   vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
+  vim.keymap.set("n", "p", "<Cmd>lua require('pack.ui').show_profile()<CR>", opts)
   vim.keymap.set("n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
   vim.keymap.set("n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
   vim.keymap.set("n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
@@ -251,6 +348,32 @@ function M.open(config)
 
   M.update()
   require("pack.async").check_all_outdated()
+end
+
+function M.show_profile()
+  local profiles = {}
+  for _, p in pairs(state.get_plugins()) do
+    if p.load_time then
+      table.insert(profiles, p)
+    end
+  end
+  table.sort(profiles, function(a, b) return a.load_time > b.load_time end)
+
+  local lines = { "  Pack Startup Profile", "  ====================", "" }
+  local total = 0
+  for _, p in ipairs(profiles) do
+    total = total + p.load_time
+    table.insert(lines, string.format("  %8.2f ms  %s", p.load_time, p.name))
+  end
+  if #profiles == 0 then
+    table.insert(lines, "  No profiles recorded.")
+  else
+    table.insert(lines, "")
+    table.insert(lines, string.format("  %8.2f ms  (total, %d plugins)", total, #profiles))
+  end
+
+  local buf = open_popup(lines, { close_keys = { "q", "p", "<Esc>" } })
+  vim.bo[buf].filetype = "pack_profile"
 end
 
 function M.show_log()
@@ -271,6 +394,9 @@ local function add_plugin_details(p, lines, highlights, indent)
       plugin_map[#lines] = p
       table.insert(highlights, { line = #lines - 1, col_start = #indent, col_end = -1, hl = "Comment" })
     end
+    -- Breathing room below an expanded plugin's info block.
+    table.insert(lines, "")
+    plugin_map[#lines] = p
   end
 end
 
@@ -336,11 +462,11 @@ local function render_outdated_tab(lines, highlights)
 
   table.insert(lines, "  Outdated (" .. #outdated .. ")")
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
-  table.insert(lines, "")
 
   for _, p in ipairs(outdated) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-    table.insert(lines, string.format("    %s %s %s — %d behind", expand_icon, config_ref.ui.icons.sync, p.name, p.behind))
+    local suffix = (p.status == "updating") and "updating…" or (p.behind .. " behind")
+    table.insert(lines, string.format("    %s %s %s — %s", expand_icon, config_ref.ui.icons.sync, p.name, suffix))
     plugin_map[#lines] = p
     table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
     table.insert(highlights, { line = #lines - 1, col_start = 8, col_end = 8 + #config_ref.ui.icons.sync, hl = "DiagnosticWarn" })
@@ -367,6 +493,9 @@ local function render_outdated_tab(lines, highlights)
           table.insert(highlights, { line = #lines - 1, col_start = 6, col_end = -1, hl = "Comment" })
         end
       end
+      -- Breathing room below an expanded plugin's info block.
+      table.insert(lines, "")
+      plugin_map[#lines] = p
     end
   end
 end
@@ -431,7 +560,20 @@ function M.update()
   table.insert(highlights, { line = #lines - 1, col_start = title_pad, col_end = title_pad + #title_str, hl = "Search" })
   table.insert(lines, help_line)
   table.insert(highlights, { line = #lines - 1, col_start = help_pad, col_end = help_pad + #help_str, hl = "Comment" })
-  table.insert(lines, "")
+
+  -- Busy line: one shared spinner for whatever async work is running.
+  if work_in_progress() then
+    local updating = false
+    for _, p in pairs(state.get_plugins()) do
+      if p.status == "updating" then updating = true break end
+    end
+    local status_str = SPINNER_FRAMES[spinner_idx] .. " " .. (updating and "updating…" or "checking for updates…")
+    local status_pad = math.max(0, math.floor((win_width - vim.fn.strdisplaywidth(status_str)) / 2))
+    table.insert(lines, string.rep(" ", status_pad) .. status_str)
+    table.insert(highlights, { line = #lines - 1, col_start = status_pad, col_end = -1, hl = "DiagnosticWarn" })
+  else
+    table.insert(lines, "")
+  end
 
   -- Render Tab Bar
   local tab_line = "  "

@@ -374,13 +374,13 @@ describe("pack.ui", function()
       ui.cycle_tab() -- all -> outdated
 
       local async = require("pack.async")
-      local updated = {}
-      local original = async.update_plugin
-      async.update_plugin = function(p) table.insert(updated, p.name) end
+      local updated
+      local original = async.update_plugins
+      async.update_plugins = function(names) updated = names end
 
       ui.update_all_outdated()
 
-      async.update_plugin = original
+      async.update_plugins = original
       assert.same({ "foo.nvim" }, updated)
     end)
   end)

@@ -1,23 +1,18 @@
 -- This example demonstrates an exhaustive list of all available features
 -- you can use when defining a plugin spec in pack.nvim.
 
-local pack_path = vim.fn.stdpath("data") .. "/site/pack/pack/opt/pack.nvim"
-if not vim.uv.fs_stat(pack_path) then
-  vim.fn.system({
-    "git", "clone", "--filter=blob:none",
-    "https://github.com/igmrrf/pack.nvim.git", "--branch=main", pack_path
-  })
-end
-vim.opt.rtp:prepend(pack_path)
+-- Bootstrap pack.nvim via native vim.pack (Neovim 0.12+).
+vim.pack.add({ "https://github.com/igmrrf/pack.nvim" })
+vim.cmd.packadd("pack.nvim")
 
 require("pack").setup({
   plugins = {
     {
       -- 1. Plugin Source
-      "user/mega-plugin",                   -- Standard GitHub repository
-      as = "mega-plugin-custom-name",       -- Custom local directory name
-      -- dir = "~/projects/mega-plugin",    -- Alternative: Use a local directory directly instead of cloning
-      -- url = "https://gitlab.com/...",     -- Alternative: Use a direct URL instead of "user/repo"
+      "user/mega-plugin",                   -- Bare "owner/repo" -> GitHub
+      as = "mega-plugin-custom-name",       -- Override the installed plugin name
+      -- "~/projects/mega-plugin",          -- Alt source: absolute/file:// local path (native clones it)
+      -- "https://gitlab.com/user/repo",    -- Alt source: any full git URL passes through untouched
       
       -- 2. Loading Mechanics
       lazy = true,                          -- Ensure it doesn't load on startup
@@ -66,10 +61,12 @@ require("pack").setup({
       --   vim.fn.system({ "make", "-C", plugin.path })
       -- end,
       
-      -- 6. Versioning (Uses git checkout)
-      branch = "main",                      -- Pin to a specific git branch
-      -- tag = "v1.0.0",                    -- Pin to a specific git tag
-      -- commit = "abcdef1",                -- Pin to a specific git commit hash
+      -- 6. Versioning (resolved to native vim.pack's `version`; native does the
+      --    checkout). Precedence: commit > tag > branch > version range.
+      branch = "main",                      -- Track a branch
+      -- tag = "v1.0.0",                    -- Pin to a tag
+      -- commit = "abcdef1",                -- Pin to a commit hash
+      -- version = "^1.0.0",                -- Or a semver range -> newest matching tag
     }
   }
 })

@@ -290,68 +290,70 @@ function M.init(config)
       end
     end
   end)
-  -- :packadd resolves <packpath-entry>/pack/*/opt|start/<name>, and our plugin
-  -- dirs live at install_path/opt|start/<name>, so the packpath entry must be
-  -- install_path's grandparent (install_path itself must end in "pack/<name>").
-  local packpath_root = vim.fn.fnamemodify(config.install_path, ":h:h")
-  if vim.fn.fnamemodify(config.install_path, ":h:t") ~= "pack" then
-    vim.notify(
-      "pack: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
-      vim.log.levels.WARN
-    )
-  end
-  vim.opt.packpath:prepend(packpath_root)
+  -- Native vim.pack installs plugins under stdpath('data')/site/pack/core/opt,
+  -- which is already on 'packpath', so :packadd resolves by name with no
+  -- prepending needed. (The old custom installer required packpath munging here.)
+end
 
-  local plugins = state.get_plugins()
-  local plugins_list = {}
-  for _, p in pairs(plugins) do
-    table.insert(plugins_list, p)
-  end
-  table.sort(plugins_list, function(a, b)
-    return a.priority > b.priority
-  end)
+-- Plugins recorded by load_fn during vim.pack.add, awaiting our ordered load.
+local pending = {}
 
-  for _, p in ipairs(plugins_list) do
-    if not p.disabled and p.status == "installed" then
-      local skip = false
+-- Passed to vim.pack.add as its `load` callback. Native invokes this per plugin
+-- instead of packadd-ing it (so nothing lands on 'runtimepath' or gets sourced).
+-- We only record the plugin + its resolved on-disk path; actual loading happens
+-- in flush_pending() after add() returns, so we control order and laziness.
+function M.load_fn(data)
+  local name = data.spec.name
+  local p = state.get_plugins()[name]
+  if p then
+    p.dir = data.path
+    if p.status ~= "loaded" then
+      p.status = "installed"
+    end
+  end
+  table.insert(pending, { name = name, path = data.path })
+end
+
+-- Load everything recorded by load_fn. Eager plugins load first, highest
+-- priority first; lazy plugins get their triggers wired instead. `cond` gates
+-- both. Mirrors the old startup loop but driven by native's add() callback.
+function M.flush_pending()
+  local eager = {}
+  for _, item in ipairs(pending) do
+    local p = state.get_plugins()[item.name]
+    if p and not p.disabled and p.status ~= "loaded" then
+      local cond_ok = true
       if p.cond ~= nil then
         local cond_val = type(p.cond) == "function" and p.cond({ path = p.dir, spec = p }) or p.cond
-        if not cond_val then skip = true end
+        cond_ok = cond_val and true or false
       end
-
-      if not skip then
+      if cond_ok then
         if p.init_hook then
           pcall(p.init_hook, { path = p.dir, spec = p })
         end
-
         if p.lazy then
           M.setup_triggers(p)
         else
-          local start_time = vim.uv.hrtime()
-          if packadd(p.name) then
-            state.update_status(p.name, "loaded")
-            local elapsed = (vim.uv.hrtime() - start_time) / 1e6
-            if p.config then
-              vim.schedule(function()
-                local config_start = vim.uv.hrtime()
-                local ok, err = pcall(p.config, { path = p.dir, spec = p }, p.opts)
-                p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
-                if not ok then
-                  vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
-                end
-              end)
-            else
-              p.load_time = elapsed
-            end
-          end
-
-          if p.keys and p.status == "loaded" then
-            setup_keys(p)
-          end
+          table.insert(eager, p)
         end
       end
     end
   end
+
+  table.sort(eager, function(a, b)
+    return a.priority > b.priority
+  end)
+
+  for _, p in ipairs(eager) do
+    M.load(p.name)
+    -- Bind directly-mapped (rhs-bearing) keys for eager plugins; lazy plugins
+    -- handle their keys via triggers instead.
+    if p.keys and p.status == "loaded" then
+      setup_keys(p)
+    end
+  end
+
+  pending = {}
 end
 
 function M.load(name)
