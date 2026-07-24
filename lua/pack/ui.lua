@@ -151,6 +151,22 @@ local function open_popup(lines, opts)
     vim.keymap.set("n", key, "<Cmd>close<CR>", { buffer = buf, noremap = true, silent = true })
   end
 
+  vim.api.nvim_create_autocmd("VimResized", {
+    callback = function()
+      if not vim.api.nvim_win_is_valid(win) then
+        return true
+      end
+      local w = math.floor(vim.o.columns * (opts.width_pct or 0.6))
+      local h = math.min(#lines + 2, math.floor(vim.o.lines * (opts.height_pct or 0.6)))
+      vim.api.nvim_win_set_config(win, {
+        width = w,
+        height = h,
+        row = math.floor((vim.o.lines - h) / 2),
+        col = math.floor((vim.o.columns - w) / 2),
+      })
+    end,
+  })
+
   return buf, win
 end
 
@@ -292,6 +308,24 @@ function M.open(config)
     col = col,
     border = config.ui.border,
     style = "minimal"
+  })
+  
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = vim.api.nvim_create_augroup("pack_ui_resize", { clear = true }),
+    callback = function()
+      if not win_id or not vim.api.nvim_win_is_valid(win_id) then
+        return true
+      end
+      local w = math.floor(vim.o.columns * 0.8)
+      local h = math.floor(vim.o.lines * 0.8)
+      vim.api.nvim_win_set_config(win_id, {
+        width = w,
+        height = h,
+        row = math.floor((vim.o.lines - h) / 2),
+        col = math.floor((vim.o.columns - w) / 2),
+      })
+      M.update()
+    end,
   })
   
   local opts = { buffer = buf_id, noremap = true, silent = true }
