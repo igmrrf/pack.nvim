@@ -132,8 +132,18 @@ function M.setup_triggers(p)
   if p.event then
     local events = type(p.event) == "table" and p.event or { p.event }
     for _, event in ipairs(events) do
-      vim.api.nvim_create_autocmd(event, {
+      local ev_name = event
+      local pat = p.pattern
+      if type(event) == "table" then
+        ev_name = event.event
+        pat = event.pattern or pat
+      elseif type(event) == "string" and event:find(" ") then
+        ev_name, pat = event:match("^(%S+)%s+(.+)$")
+      end
+
+      vim.api.nvim_create_autocmd(ev_name, {
         group = group,
+        pattern = pat,
         once = true,
         callback = function()
           M.load(p.name)
@@ -276,33 +286,52 @@ function M.init(config)
   vim.opt.packpath:prepend(packpath_root)
 
   local plugins = state.get_plugins()
-
+  local plugins_list = {}
   for _, p in pairs(plugins) do
-    if not p.disabled then
-      if p.lazy and p.status == "installed" then
-        M.setup_triggers(p)
-      elseif not p.lazy and p.status == "installed" then
-        local start_time = vim.uv.hrtime()
-        if packadd(p.name) then
-          state.update_status(p.name, "loaded")
-          local elapsed = (vim.uv.hrtime() - start_time) / 1e6
-          if p.config then
-            vim.schedule(function()
-              local config_start = vim.uv.hrtime()
-              local ok, err = pcall(p.config)
-              p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
-              if not ok then
-                vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
-              end
-            end)
-          else
-            p.load_time = elapsed
-          end
-        end
+    table.insert(plugins_list, p)
+  end
+  table.sort(plugins_list, function(a, b)
+    return a.priority > b.priority
+  end)
+
+  for _, p in ipairs(plugins_list) do
+    if not p.disabled and p.status == "installed" then
+      local skip = false
+      if p.cond ~= nil then
+        local cond_val = type(p.cond) == "function" and p.cond({ path = p.dir, spec = p }) or p.cond
+        if not cond_val then skip = true end
       end
 
-      if not p.lazy and p.keys and p.status == "loaded" then
-        setup_keys(p)
+      if not skip then
+        if p.init_hook then
+          pcall(p.init_hook, { path = p.dir, spec = p })
+        end
+
+        if p.lazy then
+          M.setup_triggers(p)
+        else
+          local start_time = vim.uv.hrtime()
+          if packadd(p.name) then
+            state.update_status(p.name, "loaded")
+            local elapsed = (vim.uv.hrtime() - start_time) / 1e6
+            if p.config then
+              vim.schedule(function()
+                local config_start = vim.uv.hrtime()
+                local ok, err = pcall(p.config, { path = p.dir, spec = p }, p.opts)
+                p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
+                if not ok then
+                  vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
+                end
+              end)
+            else
+              p.load_time = elapsed
+            end
+          end
+
+          if p.keys and p.status == "loaded" then
+            setup_keys(p)
+          end
+        end
       end
     end
   end
@@ -331,6 +360,11 @@ function M.load(name)
     end
   end
 
+  if p.cond ~= nil then
+    local cond_val = type(p.cond) == "function" and p.cond({ path = p.dir, spec = p }) or p.cond
+    if not cond_val then return end
+  end
+
   local start_time = vim.uv.hrtime()
   if packadd(name) then
     state.update_status(name, "loaded")
@@ -338,7 +372,7 @@ function M.load(name)
 
     if p.config then
       local config_start = vim.uv.hrtime()
-      local ok, err = pcall(p.config)
+      local ok, err = pcall(p.config, { path = p.dir, spec = p }, p.opts)
       p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
       if not ok then
         vim.notify("Error loading config for " .. name .. ": " .. tostring(err), vim.log.levels.ERROR)

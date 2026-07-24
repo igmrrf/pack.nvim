@@ -12,7 +12,9 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nv
 * **Lockfile Support:** Generates and respects `nvim-pack-lock.json` to ensure reproducible plugin installations across machines.
 * **Persistent States:** Disabling a plugin is persisted to `pack-disabled.json` without needing to modify your raw Lua configuration.
 * **Performance Caching:** Pre-compiles all lazy-loaded `ftdetect` files into a single cache block to avoid synchronous I/O blocks during Neovim startup.
-* **Lazy Loading:** Seamlessly supports `cmd`, `event`, `ft` (filetype), and `keys` (keymap) triggers to dynamically load plugins right when you need them.
+* **Lazy Loading:** Seamlessly supports `cmd`, `event` (with patterns), `ft` (filetype), and `keys` (keymap) triggers to dynamically load plugins right when you need them.
+* **Modular Configuration:** Keep your config clean by using `{ import = "plugins" }` to automatically split and load specs across multiple files.
+* **Fine-Grained Loading Control:** Programmatically toggle plugins with `enabled` or `cond`, and guarantee eager-load execution order using `priority`.
 
 ## 🚀 Advanced Features
 
@@ -30,7 +32,33 @@ Run custom build commands or Lua functions after a plugin is installed or update
 ```lua
 {
   "nvim-telescope/telescope-fzf-native.nvim",
-  build = "make"
+  build = "make" -- Or use a lua function: build = function(plugin) ... end
+}
+```
+
+### Context-Aware Initialization
+Hooks like `config`, `init`, `cond`, and `build` pass a rich `Plugin` object containing its filesystem `.path` and `.spec`, allowing dynamic configurations.
+```lua
+{
+  "nvim-lualine/lualine.nvim",
+  init = function(plugin)
+    -- Guaranteed to run before the plugin loads
+    vim.g.lualine_plugin_dir = plugin.path
+  end,
+  config = function(plugin, opts)
+    -- Runs after load
+    require("lualine").setup(opts)
+  end
+}
+```
+
+### Conditional Loading & Priorities
+Easily sort eager plugins or ignore them entirely.
+```lua
+{
+  "folke/tokyonight.nvim",
+  priority = 1000, -- Ensure colorscheme loads before everything else
+  cond = not vim.g.vscode, -- Skip loading if running inside VSCode
 }
 ```
 
@@ -163,6 +191,7 @@ require("pack").map_keys({
 |---|---|
 | `:Pack` | Opens the interactive dashboard UI to view current plugin status. |
 | `:Pack sync` | Installs missing plugins and updates existing plugins using parallel async workers. |
+| `:Pack clean` | Automatically removes plugin directories that are no longer referenced in your configuration. |
 | `:Pack profile` | Displays the startup profile showing plugin load times. |
 
 ## ⌨️ Dashboard Keymaps
@@ -199,3 +228,7 @@ require("pack").setup({
   }
 })
 ```
+
+## 🙏 Acknowledgements
+
+Several declarative spec and lazy-loading features (such as `import`, programmatic conditionals, advanced event pattern matching, and context-aware hook variables) were heavily inspired by [zpack.nvim](https://github.com/zuqini/zpack.nvim) and its foundational homage to `lazy.nvim`. pack.nvim combines these elegant spec configurations with its own rich asynchronous floating dashboard and interactive lockfile engine.

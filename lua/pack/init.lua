@@ -7,6 +7,9 @@ local M = {}
 M.config = {
   install_path = vim.fn.stdpath("data") .. "/site/pack/pack",
   lockfile_path = vim.fn.stdpath("config") .. "/nvim-pack-lock.json",
+  performance = {
+    vim_loader = true,
+  },
   plugins = {},
   ui = {
     border = "rounded",
@@ -20,7 +23,22 @@ M.config = {
 }
 
 local function load_plugins(spec)
-  if type(spec) == "table" then return spec end
+  if type(spec) == "table" then
+    if spec.import then
+      return load_plugins(spec.import)
+    end
+    local plugins = {}
+    for _, item in ipairs(spec) do
+      if type(item) == "table" and item.import then
+        local imported = load_plugins(item.import)
+        for _, p in ipairs(imported) do table.insert(plugins, p) end
+      else
+        table.insert(plugins, item)
+      end
+    end
+    return plugins
+  end
+
   if type(spec) ~= "string" then return {} end
   
   local plugins = {}
@@ -28,27 +46,21 @@ local function load_plugins(spec)
   local files = vim.api.nvim_get_runtime_file("lua/" .. path .. "/**/*.lua", true)
   
   if #files == 0 then
-    -- Try loading it as a single module
     local ok, mod = pcall(require, spec)
-    return (ok and type(mod) == "table") and mod or {}
+    if ok and type(mod) == "table" then
+      return load_plugins(mod)
+    end
+    return plugins
   end
 
   for _, file in ipairs(files) do
-    -- Convert path back to module name
     local mod_path = file:match("lua/(.*)%.lua$")
     if mod_path then
       local mod_name = mod_path:gsub("/", ".")
       local ok, mod = pcall(require, mod_name)
       if ok and type(mod) == "table" then
-        if type(mod[1]) == "table" or #mod > 1 then
-          -- It's a list of plugins
-          for _, p in ipairs(mod) do
-            table.insert(plugins, p)
-          end
-        elseif mod[1] and type(mod[1]) == "string" then
-          -- It's a single plugin spec
-          table.insert(plugins, mod)
-        end
+        local sub = load_plugins(mod)
+        for _, p in ipairs(sub) do table.insert(plugins, p) end
       end
     end
   end
@@ -76,6 +88,9 @@ function M.setup(opts)
     opts.plugins = nil
   end
   M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  if M.config.performance and M.config.performance.vim_loader and vim.loader then
+    vim.loader.enable()
+  end
   M.config.plugins = plugins or M.config.plugins
   state.init(M.config)
   loader.init(M.config)
@@ -138,6 +153,32 @@ function M.setup(opts)
     local arg = opts.args
     if arg == "sync" then
       require("pack.async").sync(M.config)
+    elseif arg == "clean" then
+      local install_dir = M.config.install_path .. "/opt"
+      local handle = vim.uv.fs_scandir(install_dir)
+      if handle then
+        local active_dirs = {}
+        for _, p in pairs(state.get_plugins()) do
+          if p.dir then active_dirs[p.dir] = true end
+        end
+        local to_remove = {}
+        while true do
+          local name, typ = vim.uv.fs_scandir_next(handle)
+          if not name then break end
+          local full_path = install_dir .. "/" .. name
+          if not active_dirs[full_path] then
+            table.insert(to_remove, full_path)
+          end
+        end
+        if #to_remove > 0 then
+          for _, path in ipairs(to_remove) do
+            vim.fn.delete(path, "rf")
+            vim.notify("pack: Removed unused plugin " .. vim.fn.fnamemodify(path, ":t"))
+          end
+        else
+          vim.notify("pack: Already clean")
+        end
+      end
     elseif arg == "restore" then
       require("pack.async").restore()
     elseif arg == "profile" then
@@ -168,7 +209,7 @@ function M.setup(opts)
   end, {
     nargs = "?",
     complete = function(ArgLead, CmdLine, CursorPos)
-      local subcommands = { "sync", "restore", "profile" }
+      local subcommands = { "sync", "clean", "restore", "profile" }
       local matches = {}
       for _, cmd in ipairs(subcommands) do
         if cmd:find("^" .. vim.pesc(ArgLead)) then

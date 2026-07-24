@@ -16,6 +16,10 @@ local function normalize(plugin)
     plugin = { plugin }
   end
 
+  local enabled = plugin.enabled
+  if type(enabled) == "function" then enabled = enabled() end
+  if enabled == false then return nil end
+
   local url = plugin[1]
   if type(url) ~= "string" or url == "" then
     return nil
@@ -56,6 +60,9 @@ local function normalize(plugin)
     main = plugin.main,
     opts = plugin.opts,
     config = config,
+    init_hook = plugin.init,
+    cond = plugin.cond,
+    priority = plugin.priority or 50,
     dir = "",
     status = "unknown", -- missing, installed, loaded, error
     log = {},
