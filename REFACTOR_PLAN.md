@@ -1,5 +1,10 @@
 # Refactor Plan: delegate to native `vim.pack`
 
+> **STATUS: COMPLETE** (phases 1-6, commits af9baae..0c51098). All 91 tests
+> pass; verified end-to-end against real native vim.pack (eager + lazy) in an
+> isolated XDG dir. Deviation: lock.lua deletion moved from phase 3 to phase 4
+> (async dead-paths referenced it until then).
+
 Neovim 0.12+ ships a native `vim.pack` (git installer + lockfile + updater +
 version pinning). pack.nvim currently reimplements all git operations itself.
 This refactor makes native `vim.pack` the git owner and keeps pack.nvim as the
