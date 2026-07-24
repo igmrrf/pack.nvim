@@ -209,122 +209,71 @@ describe("pack.async.parse_pending_commits", function()
   end)
 end)
 
-describe("pack.async.install", function()
-  local function make_local_upstream()
-    local upstream_dir = vim.fn.tempname() .. "-pack-install-upstream"
-    vim.fn.mkdir(upstream_dir, "p")
-    local function run(cmd)
-      vim.fn.system(cmd)
-      assert.equals(0, vim.v.shell_error, table.concat(cmd, " ") .. " failed")
-    end
-    run({ "git", "init", "-q", upstream_dir })
-    run({ "git", "-C", upstream_dir, "config", "user.email", "pack-test@example.com" })
-    run({ "git", "-C", upstream_dir, "config", "user.name", "pack-test" })
-    vim.fn.writefile({ "hello" }, upstream_dir .. "/file.txt")
-    run({ "git", "-C", upstream_dir, "add", "file.txt" })
-    run({ "git", "-C", upstream_dir, "commit", "-q", "-m", "initial commit" })
-    return upstream_dir
+describe("pack.async.run_build_hook", function()
+  local function fixture_plugin(build)
+    return { name = "fixture.nvim", dir = vim.fn.tempname(), build = build, log = {} }
   end
 
-  it("clones a missing non-lazy plugin and hands off to loader.load", function()
-    local upstream_dir = make_local_upstream()
-    local install_dir = vim.fn.tempname() .. "-pack-install-dir"
-
-    state.init({ install_path = vim.fn.tempname() .. "-pack-install", plugins = { "user/fixture-nonlazy.nvim" } })
-    local p = state.get_plugins()["fixture-nonlazy.nvim"]
-    p.url = upstream_dir
-    p.dir = install_dir
-    p.lazy = false
-
-    local loader = require("pack.loader")
-    local load_called_with = nil
-    local original_load = loader.load
-    loader.load = function(name) load_called_with = name end
-
-    async.install(p)
-
-    local ok = vim.wait(5000, function() return p.status ~= "installing" and p.status ~= "missing" end, 20)
-    vim.wait(200, function() return load_called_with ~= nil end, 10)
-
-    loader.load = original_load
-
-    assert.is_true(ok, "install did not finish in time; log:\n" .. table.concat(p.log, "\n"))
-    assert.equals("installed", p.status)
-    assert.equals(1, vim.fn.isdirectory(install_dir))
-    assert.equals("fixture-nonlazy.nvim", load_called_with)
-
-    vim.fn.delete(upstream_dir, "rf")
-    vim.fn.delete(install_dir, "rf")
+  it("no-ops (still calls done) when there is no build hook", function()
+    local done = false
+    async.run_build_hook(fixture_plugin(nil), function() done = true end)
+    assert.is_true(done)
   end)
 
-  it("clones a missing lazy plugin and wires up its triggers instead of loading it immediately", function()
-    -- Regression test: loader.init() only registers cmd/event/ft/keys
-    -- triggers for plugins already on disk at startup. A lazy plugin
-    -- installed live via :Pack sync used to end up "installed" with no
-    -- trigger ever wired up - it would silently never lazy-load until the
-    -- next Neovim restart.
-    local upstream_dir = make_local_upstream()
-    local install_dir = vim.fn.tempname() .. "-pack-install-dir"
+  it("runs a function build hook and calls done", function()
+    local ran = false
+    local done = false
+    async.run_build_hook(fixture_plugin(function() ran = true end), function() done = true end)
+    vim.wait(500, function() return done end, 10)
+    assert.is_true(ran)
+    assert.is_true(done)
+  end)
 
-    state.init({ install_path = vim.fn.tempname() .. "-pack-install", plugins = { "user/fixture-lazy.nvim" } })
-    local p = state.get_plugins()["fixture-lazy.nvim"]
-    p.url = upstream_dir
-    p.dir = install_dir
-    p.lazy = true
-    p.cmd = "PackFixtureLazyCmd"
-
-    local loader = require("pack.loader")
-    local load_called = false
-    local setup_triggers_called_with = nil
-    local original_load = loader.load
-    local original_setup_triggers = loader.setup_triggers
-    loader.load = function() load_called = true end
-    loader.setup_triggers = function(plugin) setup_triggers_called_with = plugin.name end
-
-    async.install(p)
-
-    local ok = vim.wait(5000, function() return p.status ~= "installing" and p.status ~= "missing" end, 20)
-    vim.wait(200, function() return setup_triggers_called_with ~= nil end, 10)
-
-    loader.load = original_load
-    loader.setup_triggers = original_setup_triggers
-
-    assert.is_true(ok, "install did not finish in time; log:\n" .. table.concat(p.log, "\n"))
-    assert.equals("installed", p.status)
-    assert.is_false(load_called, "a lazy plugin must not be eagerly loaded on install")
-    assert.equals(
-      "fixture-lazy.nvim",
-      setup_triggers_called_with,
-      "a freshly-installed lazy plugin must have its triggers wired up so it can lazy-load without a Neovim restart"
-    )
-
-    vim.fn.delete(upstream_dir, "rf")
-    vim.fn.delete(install_dir, "rf")
+  it("runs a string build hook via the shell in the plugin dir", function()
+    local p = fixture_plugin("echo hi > built.txt")
+    vim.fn.mkdir(p.dir, "p")
+    local done = false
+    async.run_build_hook(p, function() done = true end)
+    assert.is_true(vim.wait(3000, function() return done end, 20), "build did not finish")
+    assert.equals(1, vim.fn.filereadable(p.dir .. "/built.txt"))
+    vim.fn.delete(p.dir, "rf")
   end)
 end)
 
-describe("pack.async.sync", function()
-  it("skips disabled plugins entirely", function()
-    local state = require("pack.state")
+describe("pack.async.setup_build_hooks", function()
+  it("runs a plugin's build hook on a PackChanged install event", function()
     local persist = require("pack.persist")
     local tmp_path = vim.fn.tempname() .. "-disabled.json"
     persist._set_path_for_testing(tmp_path)
 
     state.init({ install_path = vim.fn.tempname() .. "-install", plugins = { "user/foo.nvim" } })
-    state.set_disabled("foo.nvim", true)
+    local ran = false
+    state.get_plugins()["foo.nvim"].build = function() ran = true end
 
-    local install_called = false
-    local original_install = async.install
-    async.install = function() install_called = true end
+    async.setup_build_hooks()
+    vim.api.nvim_exec_autocmds("PackChanged", {
+      pattern = "/fake/foo.nvim",
+      data = { kind = "install", spec = { name = "foo.nvim" }, path = "/fake/foo.nvim" },
+    })
 
-    async.sync({})
+    assert.is_true(vim.wait(500, function() return ran end, 10), "build hook did not run on PackChanged")
 
-    async.install = original_install
-    assert.is_false(install_called)
-
-    if vim.fn.filereadable(tmp_path) == 1 then
-      vim.fn.delete(tmp_path)
-    end
+    if vim.fn.filereadable(tmp_path) == 1 then vim.fn.delete(tmp_path) end
     persist._set_path_for_testing(nil)
+  end)
+
+  it("ignores PackChanged delete events", function()
+    state.init({ install_path = vim.fn.tempname() .. "-install", plugins = { "user/foo.nvim" } })
+    local ran = false
+    state.get_plugins()["foo.nvim"].build = function() ran = true end
+
+    async.setup_build_hooks()
+    vim.api.nvim_exec_autocmds("PackChanged", {
+      pattern = "/fake/foo.nvim",
+      data = { kind = "delete", spec = { name = "foo.nvim" }, path = "/fake/foo.nvim" },
+    })
+
+    vim.wait(200)
+    assert.is_false(ran)
   end)
 end)
