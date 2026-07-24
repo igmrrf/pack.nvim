@@ -62,6 +62,18 @@ describe("pack.async.check_outdated", function()
     assert.is_nil(p.checked_at)
   end)
 
+  it("invokes done exactly once on an ineligible plugin (busy tracking)", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local p = state.get_plugins()["foo.nvim"]
+    state.update_status("foo.nvim", "missing")
+
+    local calls = 0
+    async.check_outdated(p, function() calls = calls + 1 end)
+
+    vim.wait(100)
+    assert.equals(1, calls)
+  end)
+
   it("no-ops when plugin status is not installed or loaded", function()
     state.init(config_with({ "user/foo.nvim" }))
     local p = state.get_plugins()["foo.nvim"]
@@ -307,5 +319,25 @@ describe("pack.async.setup_build_hooks", function()
 
     vim.wait(200)
     assert.is_false(ran)
+  end)
+
+  it("restores status and clears behind when a PackChanged update completes", function()
+    state.init({ install_path = vim.fn.tempname() .. "-install", plugins = { "user/foo.nvim" } })
+    local p = state.get_plugins()["foo.nvim"]
+    -- Simulate an in-flight update: update_plugins flips status to "updating"
+    -- and stashes the prior status.
+    p.status = "updating"
+    p.status_before_update = "loaded"
+    state.set_behind("foo.nvim", 3)
+
+    async.setup_build_hooks()
+    vim.api.nvim_exec_autocmds("PackChanged", {
+      pattern = "/fake/foo.nvim",
+      data = { kind = "update", spec = { name = "foo.nvim" }, path = "/fake/foo.nvim" },
+    })
+
+    assert.is_true(vim.wait(500, function() return p.status == "loaded" end, 10), "status was not restored")
+    assert.equals(0, p.behind)
+    assert.is_nil(p.status_before_update)
   end)
 end)

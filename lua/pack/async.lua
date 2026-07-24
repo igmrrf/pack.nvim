@@ -120,13 +120,47 @@ function M.upstream_ref(plugin, dir)
   return nil
 end
 
-function M.check_outdated(plugin)
+-- Shared in-flight activity counter. Async work brackets itself with
+-- begin_activity/end_activity so the dashboard can drive ONE spinner instead of
+-- each task animating independently. Every started task must end exactly once.
+local activity = 0
+
+local function begin_activity()
+  activity = activity + 1
+  ui_update()
+  if package.loaded["pack.ui"] then
+    require("pack.ui").ensure_spinner()
+  end
+end
+
+local function end_activity()
+  if activity > 0 then
+    activity = activity - 1
+  end
+  ui_update()
+end
+
+function M.is_busy()
+  return activity > 0
+end
+
+-- done() is invoked exactly once when the check finishes on any path, so callers
+-- can pair it with end_activity for accurate busy tracking.
+function M.check_outdated(plugin, done)
+  done = done or function() end
+  local finished = false
+  local function finish()
+    if finished then return end
+    finished = true
+    done()
+  end
+
   if plugin.disabled or (plugin.status ~= "installed" and plugin.status ~= "loaded") then
-    return
+    return finish()
   end
   local dir = plugin.dir
   if not dir or dir == "" or vim.fn.isdirectory(dir) == 0 then
-    return
+    return finish()
   end
 
   git(plugin, { "fetch" }, dir, function(fetch_code)
@@ -134,7 +168,7 @@ function M.check_outdated(plugin)
       state.update_status(plugin.name, "error")
       state.set_outdated_detail(plugin.name, { error = "Upstream fetch failed" })
       ui_update()
-      return
+      return finish()
     end
 
     local ref = M.upstream_ref(plugin, dir)
@@ -143,23 +177,23 @@ function M.check_outdated(plugin)
       state.set_behind(plugin.name, 0)
       state.set_outdated_detail(plugin.name, {})
       ui_update()
-      return
+      return finish()
     end
 
     git(plugin, { "rev-list", "--count", "HEAD.." .. ref }, dir, function(count_code, count_out)
       if count_code ~= 0 then
-        return
+        return finish()
       end
       local behind = M.parse_behind_count(count_out)
       if not behind then
-        return
+        return finish()
       end
       state.set_behind(plugin.name, behind)
       ui_update()
 
       if behind == 0 then
         state.set_outdated_detail(plugin.name, {})
-        return
+        return finish()
       end
 
       -- `--short` only tolerates one rev at a time; resolve full hashes and
@@ -186,6 +220,7 @@ function M.check_outdated(plugin)
             pending_commits = pending_commits,
           })
           ui_update()
+          return finish()
         end)
       end)
     end)
@@ -195,7 +230,8 @@ end
 function M.check_all_outdated()
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and (p.status == "installed" or p.status == "loaded") then
-      M.check_outdated(p)
+      begin_activity()
+      M.check_outdated(p, end_activity)
     end
   end
 end
@@ -270,6 +306,10 @@ function M.setup_build_hooks()
       -- After an update the plugin is at the new revision: clear the stale
       -- outdated indicators and refresh the dashboard.
       if d.kind == "update" then
+        if p.status_before_update then
+          state.update_status(name, p.status_before_update)
+          p.status_before_update = nil
+        end
         state.set_behind(name, 0)
         state.set_outdated_detail(name, {})
         ui_update()
@@ -293,9 +333,26 @@ function M.update_plugins(names)
     return
   end
   local pack = require("pack")
-  if pack.native_pack and pack.native_pack.update then
-    pack.native_pack.update(names, { force = true })
+  if not (pack.native_pack and pack.native_pack.update) then
+    return
   end
+  -- Native update runs async (its own progress notification), so flip the
+  -- targeted plugins to "updating" and repaint first: the dashboard shows the
+  -- in-flight state ("updating…" in Outdated, the Updating group in All) instead
+  -- of the user staring at a frozen list. PackChanged(update) restores status.
+  local plugins = state.get_plugins()
+  for _, name in ipairs(names) do
+    local p = plugins[name]
+    if p then
+      p.status_before_update = p.status
+      state.update_status(name, "updating")
+    end
+  end
+  ui_update()
+  if package.loaded["pack.ui"] then
+    require("pack.ui").ensure_spinner()
+  end
+  pack.native_pack.update(names, { force = true })
 end
 
 return M
