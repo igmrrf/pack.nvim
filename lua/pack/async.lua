@@ -258,22 +258,33 @@ function M.setup_build_hooks()
       end
       local name = d.spec and d.spec.name
       local p = name and state.get_plugins()[name]
-      if p and p.build then
-        -- load_fn also sets p.dir, but PackChanged(install) fires before it, so
-        -- take the path straight from the event.
-        p.dir = d.path or p.dir
+      if not p then
+        return
+      end
+      -- load_fn also sets p.dir, but PackChanged(install) fires before it, so
+      -- take the path straight from the event.
+      p.dir = d.path or p.dir
+      if p.build then
         M.run_build_hook(p)
+      end
+      -- After an update the plugin is at the new revision: clear the stale
+      -- outdated indicators and refresh the dashboard.
+      if d.kind == "update" then
+        state.set_behind(name, 0)
+        state.set_outdated_detail(name, {})
+        ui_update()
       end
     end,
   })
 end
 
--- Update a single plugin by delegating to native vim.pack. Kept as a thin shim
--- for the dashboard's per-plugin/update-all actions.
+-- Update a plugin (or list of plugins) by delegating to native vim.pack.
+-- force=true skips native's confirmation buffer -- the dashboard IS the
+-- confirmation, so an in-dashboard `u`/`U` updates immediately.
 function M.update_plugin(plugin)
   local pack = require("pack")
   if pack.native_pack and pack.native_pack.update then
-    pack.native_pack.update({ plugin.name })
+    pack.native_pack.update({ plugin.name }, { force = true })
   end
 end
 
