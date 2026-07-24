@@ -6,9 +6,7 @@ local M = {}
 
 M.config = {
   -- Install location and lockfile are owned by native vim.pack and are not
-  -- configurable; kept here for reference/back-compat only.
-  install_path = vim.fn.stdpath("data") .. "/site/pack/core/opt",
-  lockfile_path = vim.fn.stdpath("config") .. "/nvim-pack-lock.json",
+  -- configurable, so they are intentionally not part of this config table.
   performance = {
     vim_loader = true,
   },
@@ -28,6 +26,17 @@ local function load_plugins(spec)
   if type(spec) == "table" then
     if spec.import then
       return load_plugins(spec.import)
+    end
+    -- Distinguish ONE plugin spec from a LIST of specs (lazy.nvim's rule): it is
+    -- a list only if it has more than one positional entry or a table at [1].
+    -- Otherwise a table carrying a url ([1] string or src=) is a single spec and
+    -- must be returned wrapped -- iterating it would keep only the bare url and
+    -- silently drop opts/config/keys/lazy/etc.
+    if not (#spec > 1 or type(spec[1]) == "table") then
+      if spec[1] or spec.src then
+        return { spec }
+      end
+      return {}
     end
     local plugins = {}
     for _, item in ipairs(spec) do
@@ -69,6 +78,10 @@ local function load_plugins(spec)
   return plugins
 end
 
+-- Exposed for tests: normalize a user `plugins`/`import` value into a flat spec
+-- list without registering anything.
+M._load_plugins = load_plugins
+
 -- Bulk-register keymaps: { { lhs, rhs, mode = "n"|{...}, desc = "...", ... }, ... }
 function M.map_keys(keys)
   for _, k in ipairs(keys) do
@@ -88,7 +101,10 @@ local function collect_native_specs(plugins_map)
   local specs = {}
   for _, p in pairs(plugins_map) do
     if not p.disabled then
-      specs[#specs + 1] = state.to_native_spec(p)
+      local ns = state.to_native_spec(p)
+      if ns then
+        specs[#specs + 1] = ns
+      end
     end
   end
   return specs
@@ -101,6 +117,9 @@ function M._install_and_load(native_specs, confirm)
   if M.native_pack and M.native_pack.add and #native_specs > 0 then
     M.native_pack.add(native_specs, { load = loader.load_fn, confirm = confirm })
   end
+  -- Local (dir=) plugins never reach native; enqueue them for the same ordered
+  -- load pass so they load at startup like everything else.
+  loader.queue_local_plugins()
   loader.flush_pending()
 end
 
@@ -134,11 +153,29 @@ function M.add(specs)
     local specs_to_add = {}
     for _, p in ipairs(added) do
       if not p.disabled then
-        specs_to_add[#specs_to_add + 1] = state.to_native_spec(p)
+        local ns = state.to_native_spec(p)
+        if ns then
+          specs_to_add[#specs_to_add + 1] = ns
+        end
       end
     end
     M._install_and_load(specs_to_add, false)
   end
+end
+
+-- pcall wrapper for native vim.pack calls. Its API is still evolving in Neovim
+-- nightly, so a signature/option change (e.g. update's `target`/`force`) would
+-- otherwise throw straight out of a :Pack command with no user-facing message.
+local function native_call(desc, fn, ...)
+  if type(fn) ~= "function" then
+    vim.notify("pack: native vim.pack." .. desc .. " is unavailable", vim.log.levels.ERROR)
+    return false
+  end
+  local ok, err = pcall(fn, ...)
+  if not ok then
+    vim.notify("pack: " .. desc .. " failed: " .. tostring(err), vim.log.levels.ERROR)
+  end
+  return ok
 end
 
 function M.setup(opts)
@@ -190,10 +227,12 @@ function M.setup(opts)
       end
     end
     -- Native removes the dir + lockfile entry.
-    pcall(function() M.native_pack.del(names) end)
+    native_call("del", M.native_pack.del, names)
   end
-  vim.pack.update = function(names)
-    M.native_pack.update(names)
+  vim.pack.update = function(names, update_opts)
+    -- Forward native's second arg (force/target/...) instead of dropping it, and
+    -- guard against a native API mismatch.
+    native_call("update", M.native_pack.update, names, update_opts)
   end
 
   -- create commands
@@ -204,16 +243,16 @@ function M.setup(opts)
     local target = args_list[2]
 
     if subcmd == "sync" then
-      M.native_pack.update()
+      native_call("sync", M.native_pack.update)
     elseif subcmd == "update" then
       if target then
         if state.get_plugins()[target] then
-          M.native_pack.update({ target })
+          native_call("update", M.native_pack.update, { target })
         else
           vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
         end
       else
-        M.native_pack.update()
+        native_call("update", M.native_pack.update)
       end
     elseif subcmd == "build" then
       if target then
@@ -242,7 +281,12 @@ function M.setup(opts)
     elseif subcmd == "clean" then
       -- Remove plugins native still manages (on disk / in lockfile) that are no
       -- longer in the configured spec.
-      local managed = M.native_pack.get and M.native_pack.get() or {}
+      local ok_get, managed = pcall(function()
+        return M.native_pack.get and M.native_pack.get() or {}
+      end)
+      if not ok_get then
+        managed = {}
+      end
       local configured = state.get_plugins()
       local removed = 0
       for _, entry in ipairs(managed) do
@@ -257,7 +301,7 @@ function M.setup(opts)
         vim.notify("pack: Already clean")
       end
     elseif subcmd == "restore" then
-      M.native_pack.update(nil, { target = "lockfile" })
+      native_call("restore", M.native_pack.update, nil, { target = "lockfile" })
     elseif subcmd == "profile" then
       ui.open(M.config)
       ui.show_profile()

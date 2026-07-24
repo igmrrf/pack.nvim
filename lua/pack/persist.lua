@@ -73,9 +73,23 @@ function M.save(set)
     return false
   end
 
-  local write_ok = pcall(vim.fn.writefile, { encoded }, M.path())
+  -- Write atomically: a temp file plus rename, so a crash mid-write can't leave
+  -- a truncated/corrupt file that wipes the disabled set.
+  local path = M.path()
+  local tmp = path .. ".tmp"
+  local write_ok = pcall(vim.fn.writefile, { encoded }, tmp)
   if not write_ok then
-    vim.notify("pack: failed to write " .. M.path(), vim.log.levels.ERROR)
+    vim.notify("pack: failed to write " .. path, vim.log.levels.ERROR)
+    pcall(vim.fn.delete, tmp)
+    return false
+  end
+  local uv = vim.uv or vim.loop
+  local rename_ok = pcall(function()
+    assert(uv.fs_rename(tmp, path))
+  end)
+  if not rename_ok then
+    vim.notify("pack: failed to write " .. path, vim.log.levels.ERROR)
+    pcall(vim.fn.delete, tmp)
     return false
   end
   return true

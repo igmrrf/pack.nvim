@@ -151,10 +151,16 @@ local function open_popup(lines, opts)
     vim.keymap.set("n", key, "<Cmd>close<CR>", { buffer = buf, noremap = true, silent = true })
   end
 
+  -- Own the resize handler in a per-popup augroup and tear it down when the
+  -- popup window closes. The previous ungrouped autocmd only self-deleted if a
+  -- VimResized happened to fire while the window was invalid, so opening and
+  -- closing popups without resizing leaked one live autocmd apiece.
+  local popup_group = vim.api.nvim_create_augroup("pack_popup_" .. buf, { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
+    group = popup_group,
     callback = function()
       if not vim.api.nvim_win_is_valid(win) then
-        return true
+        return
       end
       local w = math.floor(vim.o.columns * (opts.width_pct or 0.6))
       local h = math.min(#lines + 2, math.floor(vim.o.lines * (opts.height_pct or 0.6)))
@@ -164,6 +170,14 @@ local function open_popup(lines, opts)
         row = math.floor((vim.o.lines - h) / 2),
         col = math.floor((vim.o.columns - w) / 2),
       })
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinClosed", {
+    group = popup_group,
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      pcall(vim.api.nvim_del_augroup_by_id, popup_group)
     end,
   })
 
@@ -178,8 +192,12 @@ function M.show_help()
   open_popup(lines, { close_keys = { "q", "g?", "<Esc>" } })
 end
 
-local function plugin_at_cursor()
-  local cursor = vim.api.nvim_win_get_cursor(0)
+local function plugin_at_cursor(win)
+  win = win or 0
+  if win ~= 0 and not vim.api.nvim_win_is_valid(win) then
+    return nil
+  end
+  local cursor = vim.api.nvim_win_get_cursor(win)
   return plugin_map[cursor[1]]
 end
 
@@ -239,6 +257,10 @@ function M.show_full_details()
 end
 
 function M.toggle_disabled()
+  -- Only meaningful on the All/Disabled tabs; the Outdated tab has no disable UX.
+  if current_tab == "outdated" then
+    return
+  end
   local p = plugin_at_cursor()
   if not p then return end
 
@@ -406,7 +428,7 @@ local function render_all_tab(lines, highlights)
 
   for _, p in pairs(plugins) do
     if not p.disabled then
-      if search_term == "" or p.name:lower():match(search_term) then
+      if search_term == "" or p.name:lower():find(search_term, 1, true) then
         if groups[p.status] then table.insert(groups[p.status], p)
         else table.insert(groups.installed, p) end
       end
@@ -448,7 +470,7 @@ local function render_outdated_tab(lines, highlights)
   local outdated = {}
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      if search_term == "" or p.name:lower():match(search_term) then
+      if search_term == "" or p.name:lower():find(search_term, 1, true) then
         table.insert(outdated, p)
       end
     end
@@ -504,7 +526,7 @@ local function render_disabled_tab(lines, highlights)
   local disabled = {}
   for _, p in pairs(state.get_plugins()) do
     if p.disabled then
-      if search_term == "" or p.name:lower():match(search_term) then
+      if search_term == "" or p.name:lower():find(search_term, 1, true) then
         table.insert(disabled, p)
       end
     end
@@ -530,7 +552,13 @@ end
 function M.update()
   if not buf_id or not vim.api.nvim_buf_is_valid(buf_id) then return end
 
-  local prev_plugin = plugin_at_cursor()
+  -- Read the cursor from the dashboard window, not the currently-focused one:
+  -- M.update often fires from async callbacks while the user is in another
+  -- window, and plugin_at_cursor(0) would resolve against an unrelated cursor.
+  local prev_plugin
+  if win_id and vim.api.nvim_win_is_valid(win_id) then
+    prev_plugin = plugin_at_cursor(win_id)
+  end
   local prev_plugin_name = prev_plugin and prev_plugin.name or nil
 
   local cursor
