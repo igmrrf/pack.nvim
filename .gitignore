@@ -1,1 +1,8 @@
 .tests/
+out.txt
+test_out.txt
+*.swp
+*~
+luac.out
+doc/tags
+.DS_Store

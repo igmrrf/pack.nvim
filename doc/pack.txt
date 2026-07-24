@@ -1,0 +1,63 @@
+*pack.txt*  A Neovim plugin manager leveraging vim.pack
+
+Author:  pack.nvim contributors
+License: MIT
+
+==============================================================================
+INTRODUCTION                                                 *pack-introduction*
+
+pack.nvim is a Neovim plugin manager that leverages Neovim's native |vim.pack|
+API to handle git cloning, lockfile management, and updating. It layers a
+lazy-loading system, configuration management, and a floating UI dashboard on
+top of the native features.
+
+Features:
+- Native git operations via |vim.pack|
+- Lazy-loading by events, filetypes, commands, and keymaps
+- Floating dashboard for updates, logs, and profiling
+- Persistent disable state
+- Build hooks
+
+==============================================================================
+SETUP                                                              *pack-setup*
+
+To use pack.nvim, you must have Neovim 0.12+ which includes |vim.pack|.
+
+Initialize pack.nvim in your init.lua:
+>lua
+    require("pack").add({
+      { "nvim-lua/plenary.nvim" },
+      { "nvim-telescope/telescope.nvim", lazy = true, cmd = "Telescope" },
+    }, {
+      ui = { border = "rounded" }
+    })
+<
+
+==============================================================================
+USAGE                                                              *pack-usage*
+
+Commands:
+    :Pack        Open the pack.nvim dashboard.
+    :Pack sync   Update all plugins and build them.
+
+In the dashboard, you can use the following default mappings:
+    `g?`       - Show help popup
+    `q`        - Close dashboard
+    `<CR>`     - Toggle plugin details inline
+    `K`        - Show full plugin details (commit info)
+    `<Tab>`    - Cycle through tabs (All, Outdated, Disabled)
+    `x`        - Toggle disable/enable on the cursor plugin
+    `u`        - Update cursor plugin (in Outdated tab)
+    `U`        - Update all outdated plugins
+
+==============================================================================
+CONFIGURATION                                                *pack-configuration*
+
+`pack.add(plugins, opts)` accepts an `opts` table for configuration:
+
+Options:
+    `ui`             Table of UI configuration.
+      `border`       String or Table. Window border style (e.g. "rounded").
+
+==============================================================================
+ vim:tw=78:ts=8:ft=help:norl:

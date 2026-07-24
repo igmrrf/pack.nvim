@@ -1,0 +1,32 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: plenary tests (nvim ${{ matrix.neovim }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pack.nvim requires native vim.pack (Neovim 0.12+). "nightly" tracks
+        # the latest; pin an explicit 0.12.x tag once one is released.
+        neovim: [nightly]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Verify vim.pack is available
+        run: |
+          nvim --headless -c 'lua assert(vim.pack and vim.pack.add, "native vim.pack missing")' -c 'qa!'
+
+      - name: Run tests
+        run: make test
