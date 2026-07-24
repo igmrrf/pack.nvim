@@ -9,8 +9,8 @@ if not vim.uv.fs_stat(pack_path) then
     "git", "clone", "--filter=blob:none",
     "https://github.com/igmrrf/pack.nvim.git", "--branch=main", pack_path
   })
-  vim.opt.rtp:prepend(pack_path)
 end
+vim.opt.rtp:prepend(pack_path)
 
 -- 1. Initialize pack.nvim. It wraps `vim.pack.add` automatically!
 require("pack").setup({

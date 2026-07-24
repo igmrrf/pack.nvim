@@ -97,10 +97,10 @@ if not vim.uv.fs_stat(pack_path) then
     "--branch=main",
     pack_path,
   })
-  
-  -- Add to runtime path on the very first run
-  vim.opt.rtp:prepend(pack_path)
 end
+
+-- Add to runtime path unconditionally
+vim.opt.rtp:prepend(pack_path)
 
 -- Initialize pack.nvim
 require("pack").setup({
