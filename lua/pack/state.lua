@@ -9,6 +9,12 @@ M.plugins = {}
 -- this to know when to rebuild instead of rescanning on every lookup.
 M.generation = 0
 
+-- Directory native vim.pack installs plugins into (fixed, not configurable):
+-- stdpath('data')/site/pack/core/opt.
+function M.native_opt_dir()
+  return vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
+end
+
 -- Derive the require() module name from a plugin name when `main` isn't set,
 -- following the common "<module>.nvim" repo naming convention.
 local function default_main(name)
@@ -50,8 +56,12 @@ local function normalize(plugin, config)
     name = name:sub(1, -5)
   end
   
+  -- Treat full URLs, scp-style git remotes, file:// URLs, and absolute/home
+  -- local paths as-is; only bare "owner/repo" shorthand expands to GitHub.
   local full_url = url
-  if not (url:match("^https?://") or url:match("^git@")) then
+  if url:match("^~") then
+    full_url = vim.fn.expand(url)
+  elseif not (url:match("^%w[%w+.-]*://") or url:match("^git@") or url:match("^/")) then
     full_url = "https://github.com/" .. url
   end
   
@@ -131,30 +141,17 @@ function M.add_plugin(p, config)
     end
     
     norm.disabled = disabled_set[norm.name] or false
-    norm.dir = config.install_path .. "/opt/" .. norm.name
-    
-    if norm.local_dir then
-      norm.local_dir = vim.fn.expand(norm.local_dir)
-      if vim.fn.isdirectory(norm.dir) == 0 then
-        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
-        vim.fn.mkdir(parent_dir, "p")
-        pcall(vim.uv.fs_symlink, norm.local_dir, norm.dir, { dir = true })
-      end
-    else
-      local legacy_start_dir = config.install_path .. "/start/" .. norm.name
-      if vim.fn.isdirectory(norm.dir) == 0 and vim.fn.isdirectory(legacy_start_dir) == 1 then
-        local parent_dir = vim.fn.fnamemodify(norm.dir, ":h")
-        vim.fn.mkdir(parent_dir, "p")
-        vim.fn.rename(legacy_start_dir, norm.dir)
-      end
-    end
-    
+    -- Native vim.pack owns the install location; this is the authoritative path
+    -- it will use. load_fn / reconcile_from_native confirm it post-install, but
+    -- computing it here lets us show an accurate status before add() runs.
+    norm.dir = M.native_opt_dir() .. "/" .. norm.name
+
     if vim.fn.isdirectory(norm.dir) == 1 then
       norm.status = "installed"
     else
       norm.status = "missing"
     end
-    
+
     M.plugins[norm.name] = norm
     table.insert(added_list, norm)
     ::continue::
@@ -217,6 +214,30 @@ function M.set_outdated_detail(name, detail)
   p.revision_after = detail.revision_after
   p.upstream_branch = detail.upstream_branch
   p.pending_commits = detail.pending_commits
+end
+
+-- Refresh installed-status / on-disk path / recorded revision from what native
+-- vim.pack actually has. load_fn already reconciles on add; this is for the
+-- dashboard to reflect installs/updates that happened via native afterwards.
+function M.reconcile_from_native(native_pack)
+  if not (native_pack and native_pack.get) then
+    return
+  end
+  local ok, list = pcall(native_pack.get)
+  if not ok or type(list) ~= "table" then
+    return
+  end
+  for _, entry in ipairs(list) do
+    local name = entry.spec and entry.spec.name
+    local p = name and M.plugins[name]
+    if p then
+      p.dir = entry.path or p.dir
+      p.rev = entry.rev or p.rev
+      if p.status == "missing" then
+        p.status = "installed"
+      end
+    end
+  end
 end
 
 -- Resolve a pack.nvim plugin's pin fields to native vim.pack's single

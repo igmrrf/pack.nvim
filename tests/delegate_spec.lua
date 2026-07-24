@@ -132,4 +132,17 @@ describe("pack.init native delegation", function()
     fake.get_result = { "sentinel" }
     assert.same({ "sentinel" }, vim.pack.get())
   end)
+
+  it("reconcile_from_native updates dir/rev/status from native get()", function()
+    do_setup({ "user/foo.nvim" })
+    local p = state.get_plugins()["foo.nvim"]
+    p.status = "missing"
+    fake.get_result = {
+      { spec = { name = "foo.nvim" }, path = "/real/foo.nvim", rev = "cafebabe" },
+    }
+    state.reconcile_from_native(require("pack").native_pack)
+    assert.equals("/real/foo.nvim", p.dir)
+    assert.equals("cafebabe", p.rev)
+    assert.equals("installed", p.status)
+  end)
 end)

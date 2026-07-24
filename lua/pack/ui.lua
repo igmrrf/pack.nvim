@@ -202,6 +202,10 @@ end
 
 function M.open(config)
   config_ref = config
+  -- Refresh status/path/rev from native vim.pack before rendering.
+  pcall(function()
+    state.reconcile_from_native(require("pack").native_pack)
+  end)
   if win_id and vim.api.nvim_win_is_valid(win_id) then
     vim.api.nvim_set_current_win(win_id)
     return
