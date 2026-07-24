@@ -148,8 +148,13 @@ function M.setup_triggers(p)
       group = group,
       pattern = fts,
       once = true,
-      callback = function()
+      callback = function(args)
         M.load(p.name)
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(args.buf) then
+            vim.api.nvim_exec_autocmds("FileType", { buffer = args.buf, modeline = false })
+          end
+        end)
       end,
     })
   end
@@ -192,7 +197,28 @@ function M.enable(p)
   end
 end
 
+function M.build_cache()
+  local cache_file = vim.fn.stdpath("data") .. "/packui_ftdetect_cache.lua"
+  local plugins = require("packui.state").get_plugins()
+  local lines = {}
+  for _, p in pairs(plugins) do
+    if not p.disabled and p.status == "installed" then
+      local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
+      for _, file in ipairs(ftdetect_vim) do
+        table.insert(lines, 'vim.cmd("source " .. ' .. string.format("q", vim.fn.fnameescape(file)) .. ')')
+      end
+      local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
+      for _, file in ipairs(ftdetect_lua) do
+        table.insert(lines, 'dofile(' .. string.format("q", file) .. ')')
+      end
+    end
+  end
+  vim.fn.writefile(lines, cache_file)
+end
+
 function M.init(config)
+  pcall(dofile, vim.fn.stdpath("data") .. "/packui_ftdetect_cache.lua")
+
   -- Intercept requires for disabled plugins to prevent configuration crashes.
   -- If a disabled module is required directly (not inside pcall), we return a deep mock table.
   table.insert(package.loaders or package.searchers, 1, function(modname)

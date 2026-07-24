@@ -16,6 +16,11 @@ end
 
 local function process_queue()
   if active_jobs >= M.max_jobs or #queue == 0 then
+    if active_jobs == 0 and #queue == 0 then
+      if package.loaded["packui.loader"] then
+        pcall(require("packui.loader").build_cache)
+      end
+    end
     return
   end
   
@@ -30,28 +35,88 @@ local function process_queue()
   process_queue()
 end
 
-function M.spawn(plugin, cmd, args, cwd, on_exit)
+function M.spawn(plugin, cmd, args, cwd, capture_output, on_exit)
+  if type(capture_output) == "function" then
+    on_exit = capture_output
+    capture_output = false
+  end
+
   local stdout = vim.uv.new_pipe()
   local stderr = vim.uv.new_pipe()
 
   append_log(plugin, "$ " .. cmd .. " " .. table.concat(args, " "))
 
   local captured_stdout = {}
-
+  local exit_code = nil
+  local pipes_closed = 0
   local handle
+
+  local function check_done()
+    if exit_code ~= nil and pipes_closed == 2 then
+      if handle and not handle:is_closing() then handle:close() end
+      if type(on_exit) == "function" then
+        vim.schedule(function()
+          on_exit(exit_code, table.concat(captured_stdout, "\n"))
+        end)
+      end
+    end
+  end
+
+  local function make_on_read(pipe, is_stdout)
+    local buf = ""
+    return function(err, data)
+      if err or not data then
+        if buf ~= "" then
+          local last = buf:match("([^\r]*)$")
+          if last and last ~= "" then
+            vim.schedule(function() append_log(plugin, last) end)
+            if is_stdout and capture_output then
+              table.insert(captured_stdout, last)
+            end
+          end
+        end
+        pipe:read_stop()
+        pipe:close()
+        pipes_closed = pipes_closed + 1
+        check_done()
+        return
+      end
+      
+      buf = buf .. data
+      local lines_to_log = {}
+      
+      while true do
+        local line_end = buf:find("\n")
+        if not line_end then break end
+        local line = buf:sub(1, line_end - 1)
+        buf = buf:sub(line_end + 1)
+        
+        local last = line:match("([^\r]*)$")
+        if last and last ~= "" then
+          table.insert(lines_to_log, last)
+          if is_stdout and capture_output then
+            table.insert(captured_stdout, last)
+          end
+        end
+      end
+      
+      if #lines_to_log > 0 then
+        vim.schedule(function()
+          for _, l in ipairs(lines_to_log) do
+            append_log(plugin, l)
+          end
+        end)
+      end
+    end
+  end
+
   handle = vim.uv.spawn(cmd, {
     args = args,
     cwd = cwd,
     stdio = { nil, stdout, stderr }
   }, function(code, signal)
-    stdout:read_stop()
-    stderr:read_stop()
-    stdout:close()
-    stderr:close()
-    handle:close()
-    vim.schedule(function()
-      if on_exit then on_exit(code, table.concat(captured_stdout, "\n")) end
-    end)
+    exit_code = code
+    check_done()
   end)
 
   if not handle then
@@ -59,32 +124,13 @@ function M.spawn(plugin, cmd, args, cwd, on_exit)
     stderr:close()
     append_log(plugin, "Failed to spawn " .. cmd)
     vim.schedule(function()
-      if on_exit then on_exit(-1, "") end
+      if type(on_exit) == "function" then on_exit(-1, "") end
     end)
     return
   end
 
-  local function make_on_read(is_stdout)
-    return function(err, data)
-      if data then
-        vim.schedule(function()
-          for line in data:gmatch("([^\n]+)") do
-            -- collapse carriage-return progress updates (e.g. git clone %) to the last segment
-            local last = line:match("([^\r]*)$")
-            if last ~= "" then
-              append_log(plugin, last)
-              if is_stdout then
-                table.insert(captured_stdout, last)
-              end
-            end
-          end
-        end)
-      end
-    end
-  end
-
-  stdout:read_start(make_on_read(true))
-  stderr:read_start(make_on_read(false))
+  stdout:read_start(make_on_read(stdout, true))
+  stderr:read_start(make_on_read(stderr, false))
 end
 
 function M.install(plugin)
@@ -126,7 +172,7 @@ function M.install(plugin)
             end)
           end)
         else
-          M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, function(rev_code, output)
+          M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
             if rev_code == 0 and output then
               local hash = output:match("([^\r\n]+)")
               if hash then lock.set_commit(plugin.name, hash, plugin.url) end
@@ -156,7 +202,7 @@ function M.update_plugin(plugin)
 
     M.spawn(plugin, "git", { "pull", "--rebase" }, plugin.dir, function(code)
       if code == 0 then
-        M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, function(rev_code, output)
+        M.spawn(plugin, "git", { "rev-parse", "HEAD" }, plugin.dir, true, function(rev_code, output)
           if rev_code == 0 and output then
             local hash = output:match("([^\r\n]+)")
             if hash then
@@ -235,10 +281,15 @@ function M.check_outdated(plugin)
   table.insert(queue, function(done)
     M.spawn(plugin, "git", { "fetch" }, plugin.dir, function(fetch_code)
       if fetch_code ~= 0 then
+        state.update_status(plugin.name, "error")
+        state.set_outdated_detail(plugin.name, { error = "Upstream fetch failed" })
+        if package.loaded["packui.ui"] then
+          require("packui.ui").update()
+        end
         done()
         return
       end
-      M.spawn(plugin, "git", { "rev-list", "--count", "HEAD..@{upstream}" }, plugin.dir, function(count_code, output)
+      M.spawn(plugin, "git", { "rev-list", "--count", "HEAD..@{upstream}" }, plugin.dir, true, function(count_code, output)
         if count_code ~= 0 then
           done()
           return
@@ -263,7 +314,7 @@ function M.check_outdated(plugin)
         -- single --short) fails with "fatal: Needed a single revision" on
         -- real git; --short only tolerates one rev argument at a time.
         -- Resolve full hashes instead and truncate them ourselves.
-        M.spawn(plugin, "git", { "rev-parse", "HEAD", "@{upstream}" }, plugin.dir, function(rev_code, rev_output)
+        M.spawn(plugin, "git", { "rev-parse", "HEAD", "@{upstream}" }, plugin.dir, true, function(rev_code, rev_output)
           local revision_before, revision_after
           if rev_code == 0 then
             local full_before, full_after = M.parse_revision_pair(rev_output)
@@ -271,13 +322,13 @@ function M.check_outdated(plugin)
             revision_after = full_after and full_after:sub(1, 7)
           end
 
-          M.spawn(plugin, "git", { "rev-parse", "--abbrev-ref", "@{upstream}" }, plugin.dir, function(branch_code, branch_output)
+          M.spawn(plugin, "git", { "rev-parse", "--abbrev-ref", "@{upstream}" }, plugin.dir, true, function(branch_code, branch_output)
             local upstream_branch
             if branch_code == 0 then
               upstream_branch = M.parse_upstream_branch_name(branch_output)
             end
 
-            M.spawn(plugin, "git", { "log", "--format=%h │ %s", "HEAD..@{upstream}" }, plugin.dir, function(log_code, log_output)
+            M.spawn(plugin, "git", { "log", "--format=%h │ %s", "HEAD..@{upstream}" }, plugin.dir, true, function(log_code, log_output)
               local pending_commits = {}
               if log_code == 0 then
                 pending_commits = M.parse_pending_commits(log_output)
