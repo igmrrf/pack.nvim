@@ -67,7 +67,7 @@ function M.spawn(plugin, cmd, args, cwd, capture_output, on_exit)
     return function(err, data)
       if err or not data then
         if buf ~= "" then
-          local last = buf:match("([^\r]*)$")
+          local last = buf:gsub("\r+$", ""):match("([^\r]*)$")
           if last and last ~= "" then
             vim.schedule(function() append_log(plugin, last) end)
             if is_stdout and capture_output then
@@ -91,7 +91,7 @@ function M.spawn(plugin, cmd, args, cwd, capture_output, on_exit)
         local line = buf:sub(1, line_end - 1)
         buf = buf:sub(line_end + 1)
         
-        local last = line:match("([^\r]*)$")
+        local last = line:gsub("\r+$", ""):match("([^\r]*)$")
         if last and last ~= "" then
           table.insert(lines_to_log, last)
           if is_stdout and capture_output then

@@ -3,7 +3,7 @@ local state = require("packui.state")
 local M = {}
 
 local function packadd(name)
-  local ok, err = pcall(vim.cmd, "packadd " .. name)
+  local ok, err = pcall(vim.cmd.packadd, name)
   if not ok then
     vim.notify("Error loading plugin " .. name .. ": " .. tostring(err), vim.log.levels.ERROR)
   end
