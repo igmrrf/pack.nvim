@@ -171,14 +171,28 @@ describe("pack.async.check_outdated", function()
 end)
 
 describe("pack.async.upstream_ref", function()
+  -- upstream_ref is async: it takes a callback and may spawn `git symbolic-ref`
+  -- rather than blocking the UI thread.
+  local function resolve(plugin, dir)
+    local called, ref = false, nil
+    async.upstream_ref(plugin, dir, function(r)
+      called, ref = true, r
+    end)
+    vim.wait(2000, function()
+      return called
+    end)
+    assert.is_true(called, "upstream_ref must invoke its callback")
+    return ref
+  end
+
   it("tracks origin/<branch> for a branch-pinned plugin", function()
-    assert.equals("origin/develop", async.upstream_ref({ branch = "develop" }, "/nope"))
+    assert.equals("origin/develop", resolve({ branch = "develop" }, "/nope"))
   end)
 
   it("returns nil for a tag/commit/version pin (nothing to track)", function()
-    assert.is_nil(async.upstream_ref({ tag = "v1.0.0" }, "/nope"))
-    assert.is_nil(async.upstream_ref({ commit = "abcdef1" }, "/nope"))
-    assert.is_nil(async.upstream_ref({ version = ">=1.0" }, "/nope"))
+    assert.is_nil(resolve({ tag = "v1.0.0" }, "/nope"))
+    assert.is_nil(resolve({ commit = "abcdef1" }, "/nope"))
+    assert.is_nil(resolve({ version = ">=1.0" }, "/nope"))
   end)
 
   it("resolves the remote default branch (origin/HEAD) for an unpinned plugin", function()
@@ -195,7 +209,7 @@ describe("pack.async.upstream_ref", function()
     local clone = vim.fn.tempname() .. "-uref-clone"
     run({ "git", "clone", "-q", upstream, clone })
 
-    assert.equals("origin/main", async.upstream_ref({}, clone))
+    assert.equals("origin/main", resolve({}, clone))
 
     vim.fn.delete(upstream, "rf")
     vim.fn.delete(clone, "rf")
@@ -281,6 +295,32 @@ describe("pack.async.run_build_hook", function()
     assert.is_true(vim.wait(3000, function() return done end, 20), "build did not finish")
     assert.equals(1, vim.fn.filereadable(p.dir .. "/built.txt"))
     vim.fn.delete(p.dir, "rf")
+  end)
+
+  it("runs a ':' string build hook as a Vim command (lazy.nvim style)", function()
+    _G.PACK_BUILD_CMD_RAN = nil
+    vim.api.nvim_create_user_command("PackBuildTestCmd", function()
+      _G.PACK_BUILD_CMD_RAN = true
+    end, {})
+    local done = false
+    async.run_build_hook(fixture_plugin(":PackBuildTestCmd"), function() done = true end)
+    assert.is_true(vim.wait(500, function() return done end, 10), "build did not finish")
+    assert.is_true(_G.PACK_BUILD_CMD_RAN, "':' build must run as a Vim command")
+    vim.api.nvim_del_user_command("PackBuildTestCmd")
+    _G.PACK_BUILD_CMD_RAN = nil
+  end)
+
+  it("runs a list of build hooks in sequence and calls done exactly once", function()
+    local order = {}
+    local p = fixture_plugin({
+      function() table.insert(order, "a") end,
+      function() table.insert(order, "b") end,
+    })
+    local done_count = 0
+    async.run_build_hook(p, function() done_count = done_count + 1 end)
+    assert.is_true(vim.wait(1000, function() return done_count > 0 end, 10), "build did not finish")
+    assert.same({ "a", "b" }, order)
+    assert.equals(1, done_count, "done must be called once for a list of hooks")
   end)
 end)
 

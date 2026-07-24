@@ -4,6 +4,10 @@ local M = {}
 
 M.max_log_lines = 500
 
+-- How long (ms) to wait for a PackChanged(update) before force-restoring a
+-- plugin's status from "updating" (guards against native emitting no event).
+M.update_recover_ms = 30000
+
 local function append_log(plugin, line)
   plugin.log = plugin.log or {}
   table.insert(plugin.log, line)
@@ -103,21 +107,25 @@ end
 -- plugin tracks the remote's default branch (origin/HEAD). A plugin pinned to a
 -- tag/commit/version range has no "newer commits on the branch" notion, so
 -- return nil to skip it.
-function M.upstream_ref(plugin, dir)
+-- Async: resolves the upstream ref via `cb(ref_or_nil)`. Branch-pinned and
+-- fully-pinned (tag/commit/version) cases answer immediately; the unpinned case
+-- spawns a non-blocking `git symbolic-ref` instead of blocking the UI thread.
+function M.upstream_ref(plugin, dir, cb)
   if plugin.branch then
-    return "origin/" .. plugin.branch
+    return cb("origin/" .. plugin.branch)
   end
   if plugin.tag or plugin.commit or plugin.version or plugin.sem_version then
-    return nil
+    return cb(nil)
   end
-  local out = vim.fn.system({ "git", "-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
-  if vim.v.shell_error == 0 then
-    local ref = vim.trim(out)
-    if ref ~= "" then
-      return ref
+  git(plugin, { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, dir, function(code, out)
+    if code == 0 then
+      local ref = vim.trim(out or "")
+      if ref ~= "" then
+        return cb(ref)
+      end
     end
-  end
-  return nil
+    cb(nil)
+  end)
 end
 
 -- Shared in-flight activity counter. Async work brackets itself with
@@ -171,7 +179,7 @@ function M.check_outdated(plugin, done)
       return finish()
     end
 
-    local ref = M.upstream_ref(plugin, dir)
+    M.upstream_ref(plugin, dir, function(ref)
     if not ref then
       -- Pinned (tag/commit/version) or no resolvable upstream: not "outdated".
       state.set_behind(plugin.name, 0)
@@ -224,40 +232,98 @@ function M.check_outdated(plugin, done)
         end)
       end)
     end)
+    end) -- close M.upstream_ref callback
   end)
 end
 
-function M.check_all_outdated()
-  for _, p in pairs(state.get_plugins()) do
-    if not p.disabled and (p.status == "installed" or p.status == "loaded") then
-      begin_activity()
-      M.check_outdated(p, end_activity)
+-- Max concurrent git probes and how long (seconds) a plugin's outdated result
+-- stays fresh before check_all_outdated will re-probe it.
+M.max_concurrency = 8
+M.outdated_cooldown = 300
+
+-- Run `worker(item, done)` over items with at most `limit` in flight. `worker`
+-- must call `done` exactly once when its (async) work finishes. This is what
+-- keeps a large config from launching N simultaneous `git fetch` processes.
+function M.run_queued(items, worker, limit)
+  limit = limit or M.max_concurrency
+  local idx, inflight = 0, 0
+  local function pump()
+    while inflight < limit and idx < #items do
+      idx = idx + 1
+      inflight = inflight + 1
+      local item = items[idx]
+      local finished = false
+      worker(item, function()
+        if finished then
+          return
+        end
+        finished = true
+        inflight = inflight - 1
+        pump()
+      end)
     end
   end
+  pump()
+end
+
+-- Plugins eligible for an outdated re-check: installed/loaded, not disabled, and
+-- not checked within the cooldown window (so re-opening the dashboard doesn't
+-- re-fetch everything every time).
+function M.outdated_targets()
+  local now = os.time()
+  local targets = {}
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and (p.status == "installed" or p.status == "loaded") then
+      if not (p.checked_at and (now - p.checked_at) < M.outdated_cooldown) then
+        targets[#targets + 1] = p
+      end
+    end
+  end
+  return targets
+end
+
+function M.check_all_outdated()
+  M.run_queued(M.outdated_targets(), function(p, done)
+    begin_activity()
+    M.check_outdated(p, function()
+      end_activity()
+      done()
+    end)
+  end, M.max_concurrency)
 end
 
 -- Build hooks ---------------------------------------------------------------
 
-function M.run_build_hook(plugin, done_cb)
-  done_cb = done_cb or function() end
-  if not plugin.build then
-    return done_cb()
-  end
-
-  if type(plugin.build) == "function" then
+-- Run a single build step, then call cb(). Mirrors lazy.nvim's build forms:
+--   * function        -> called with the plugin context
+--   * ":SomeCommand"  -> run as a Vim ex-command
+--   * "shell string"  -> run through the shell (sh, or cmd.exe on Windows)
+local function run_build_step(plugin, hook, cb)
+  if type(hook) == "function" then
     vim.schedule(function()
-      local ok, err = pcall(plugin.build, { path = plugin.dir, spec = plugin })
+      local ok, err = pcall(hook, { path = plugin.dir, spec = plugin })
       if not ok then
         vim.notify("pack: build hook failed for " .. plugin.name .. "\n" .. tostring(err), vim.log.levels.ERROR)
       end
-      done_cb()
+      cb()
     end)
-  elseif type(plugin.build) == "string" then
-    -- SECURITY: a string build hook runs verbatim via `sh -c` (arbitrary
-    -- shell). Trusted-spec only, never a remote/lockfile value - same model as
-    -- lazy.nvim.
-    append_log(plugin, "$ sh -c " .. plugin.build)
-    vim.system({ "sh", "-c", plugin.build }, { cwd = plugin.dir, text = true }, function(res)
+  elseif type(hook) == "string" and hook:sub(1, 1) == ":" then
+    -- Vim ex-command form, e.g. build = ":TSUpdate".
+    vim.schedule(function()
+      append_log(plugin, "$ " .. hook)
+      local ok, err = pcall(vim.cmd, hook:sub(2))
+      if not ok then
+        vim.notify("pack: build command failed for " .. plugin.name .. ": " .. tostring(err), vim.log.levels.ERROR)
+      end
+      cb()
+    end)
+  elseif type(hook) == "string" then
+    -- SECURITY: a shell build hook runs verbatim (arbitrary shell). Trusted-spec
+    -- only, never a remote/lockfile value - same model as lazy.nvim. On Windows
+    -- there is no `sh`, so use cmd.exe.
+    local shell = vim.fn.has("win32") == 1 and { "cmd", "/c", hook } or { "sh", "-c", hook }
+    append_log(plugin, "$ " .. table.concat(shell, " "))
+    vim.system(shell, { cwd = plugin.dir, text = true }, function(res)
       vim.schedule(function()
         local combined = (res.stdout or "")
         if res.stderr and res.stderr ~= "" then
@@ -272,12 +338,34 @@ function M.run_build_hook(plugin, done_cb)
             vim.log.levels.ERROR
           )
         end
-        done_cb()
+        cb()
       end)
     end)
   else
-    done_cb()
+    cb()
   end
+end
+
+-- Run a plugin's `build` hook. Accepts a function, a string (":Cmd" or shell),
+-- or a list of any of those run in sequence, and calls done_cb() exactly once
+-- when all steps finish. Matches lazy.nvim's build spec.
+function M.run_build_hook(plugin, done_cb)
+  done_cb = done_cb or function() end
+  local build = plugin.build
+  if not build then
+    return done_cb()
+  end
+
+  local steps = type(build) == "table" and build or { build }
+  local i = 0
+  local function next_step()
+    i = i + 1
+    if i > #steps then
+      return done_cb()
+    end
+    run_build_step(plugin, steps[i], next_step)
+  end
+  next_step()
 end
 
 -- Register a PackChanged autocmd that runs build hooks after native installs or
@@ -300,6 +388,11 @@ function M.setup_build_hooks()
       -- load_fn also sets p.dir, but PackChanged(install) fires before it, so
       -- take the path straight from the event.
       p.dir = d.path or p.dir
+      -- Native vim.pack does not recurse submodules; initialize them on install
+      -- so plugins that ship submodules are complete before their build hook.
+      if d.kind == "install" and p.dir and vim.fn.filereadable(p.dir .. "/.gitmodules") == 1 then
+        vim.system({ "git", "submodule", "update", "--init", "--recursive" }, { cwd = p.dir })
+      end
       if p.build then
         M.run_build_hook(p)
       end
@@ -352,7 +445,31 @@ function M.update_plugins(names)
   if package.loaded["pack.ui"] then
     require("pack.ui").ensure_spinner()
   end
-  pack.native_pack.update(names, { force = true })
+
+  -- Restore any of `names` still stuck in "updating" back to its prior status.
+  -- Covers both a synchronous throw below and the silent case where native
+  -- emits no PackChanged(update) (e.g. a plugin already at its latest revision),
+  -- which would otherwise leave the dashboard showing "updating…" forever.
+  local function recover()
+    for _, name in ipairs(names) do
+      local p = plugins[name]
+      if p and p.status == "updating" then
+        state.update_status(name, p.status_before_update or "installed")
+        p.status_before_update = nil
+      end
+    end
+    ui_update()
+  end
+
+  local ok, err = pcall(pack.native_pack.update, names, { force = true })
+  if not ok then
+    vim.notify("pack: update failed: " .. tostring(err), vim.log.levels.ERROR)
+    recover()
+    return
+  end
+  -- Fallback timer for the no-event case; PackChanged(update) normally restores
+  -- status well before this fires.
+  vim.defer_fn(recover, M.update_recover_ms)
 end
 
 return M

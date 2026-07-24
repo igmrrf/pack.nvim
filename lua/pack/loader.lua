@@ -2,12 +2,48 @@ local state = require("pack.state")
 
 local M = {}
 
+-- Generate :help tags for a plugin's doc/ directory so `:help <tag>` works for
+-- managed plugins (native vim.pack / :packadd does not do this automatically).
+local function gen_helptags(dir)
+  if not dir or dir == "" then
+    return
+  end
+  local doc = dir .. "/doc"
+  if vim.fn.isdirectory(doc) == 1 and #vim.fn.globpath(doc, "*.txt", true, true) > 0 then
+    pcall(vim.cmd, "helptags " .. vim.fn.fnameescape(doc))
+  end
+end
+
 local function packadd(name)
   local ok, err = pcall(vim.cmd.packadd, name)
   if not ok then
     vim.notify("Error loading plugin " .. name .. ": " .. tostring(err), vim.log.levels.ERROR)
   end
   return ok
+end
+
+-- Load a local (`dir=`) plugin. Native vim.pack never manages it and it lives
+-- outside the packpath's opt dir, so `:packadd` can't find it: add its directory
+-- to 'runtimepath' (for lua/ requires) and source its plugin/ files the way
+-- packadd would.
+local function load_local(p)
+  if not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0 then
+    vim.notify(
+      "pack: local plugin directory not found for " .. p.name .. ": " .. tostring(p.dir),
+      vim.log.levels.ERROR
+    )
+    return false
+  end
+  vim.opt.runtimepath:append(p.dir)
+  for _, pat in ipairs({ "plugin/**/*.vim", "plugin/**/*.lua" }) do
+    for _, file in ipairs(vim.fn.globpath(p.dir, pat, true, true)) do
+      local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
+      if not ok then
+        vim.notify("pack: error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
+      end
+    end
+  end
+  return true
 end
 
 -- Accepts: "<lhs>" | { "<lhs>", mode=... } | { "<lhs>", rhs, mode=..., desc=..., ... }
@@ -38,7 +74,12 @@ end
 local function setup_keys(p)
   for _, entry in ipairs(normalize_key_entries(p.keys)) do
     local lhs = entry.lhs
-    if not p.lazy then
+    if not lhs then
+      vim.notify(
+        "pack: '" .. p.name .. "' has a keys entry with no lhs - skipping",
+        vim.log.levels.WARN
+      )
+    elseif not p.lazy then
       if entry.rhs == nil then
         vim.notify(
           "pack: '" .. p.name .. "' keys entry '" .. lhs .. "' has no rhs and the plugin isn't lazy - nothing to bind",
@@ -212,7 +253,11 @@ function M.build_cache()
   local plugins = require("pack.state").get_plugins()
   local lines = {}
   for _, p in pairs(plugins) do
-    if not p.disabled and p.status == "installed" then
+    -- Precompile ftdetect only for LAZY plugins: an eager plugin is sourced at
+    -- startup anyway, so its ftdetect runs regardless. A not-yet-loaded lazy
+    -- plugin needs this cache for its filetypes to be detected before load.
+    -- Accept "loaded" too (a lazy plugin loaded earlier this session).
+    if not p.disabled and p.lazy and (p.status == "installed" or p.status == "loaded") then
       local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
       for _, file in ipairs(ftdetect_vim) do
         table.insert(lines, 'vim.cmd("source " .. ' .. string.format("%q", vim.fn.fnameescape(file)) .. ')')
@@ -233,7 +278,17 @@ local mod_cache = { gen = -1, map = {} }
 local function resolve_plugin(modname)
   if mod_cache.gen ~= state.generation then
     local map = {}
-    for name, p in pairs(state.get_plugins()) do
+    -- Iterate in a stable (sorted) order so that when two plugins share a base
+    -- or head segment, the same one deterministically wins the mapping instead
+    -- of depending on pairs() iteration order.
+    local plugins = state.get_plugins()
+    local names = {}
+    for name in pairs(plugins) do
+      names[#names + 1] = name
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+      local p = plugins[name]
       local base = p.main or (name:match("([^/]+)$") or name):gsub("%.nvim$", "")
       map[name] = map[name] or p
       map[base] = map[base] or p
@@ -314,6 +369,20 @@ function M.load_fn(data)
   table.insert(pending, { name = name, path = data.path })
 end
 
+-- Enqueue local (`dir=`) plugins for loading. They never pass through native's
+-- load_fn (nothing is cloned), so flush_pending would otherwise never see them.
+-- Idempotent across calls: a plugin already "loaded" is skipped.
+function M.queue_local_plugins()
+  for name, p in pairs(state.get_plugins()) do
+    if p.is_local and not p.disabled and p.status ~= "loaded" then
+      if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir) == 1 then
+        p.status = "installed"
+        table.insert(pending, { name = name, path = p.dir })
+      end
+    end
+  end
+end
+
 -- Load everything recorded by load_fn. Eager plugins load first, highest
 -- priority first; lazy plugins get their triggers wired instead. `cond` gates
 -- both. Mirrors the old startup loop but driven by native's add() callback.
@@ -341,11 +410,17 @@ function M.flush_pending()
   end
 
   table.sort(eager, function(a, b)
-    return a.priority > b.priority
+    -- Highest priority first; break ties by name so equal-priority plugins load
+    -- in a stable order across runs (pairs()/native ordering is nondeterministic).
+    if a.priority ~= b.priority then
+      return a.priority > b.priority
+    end
+    return a.name < b.name
   end)
 
   for _, p in ipairs(eager) do
-    M.load(p.name)
+    -- cond was already evaluated above; don't re-run it (side effects).
+    M.load(p.name, { cond_checked = true })
     -- Bind directly-mapped (rhs-bearing) keys for eager plugins; lazy plugins
     -- handle their keys via triggers instead.
     if p.keys and p.status == "loaded" then
@@ -354,39 +429,62 @@ function M.flush_pending()
   end
 
   pending = {}
+
+  -- Regenerate the ftdetect precompile cache now that the installed/lazy set is
+  -- settled. pcall so a write failure never breaks startup.
+  pcall(M.build_cache)
 end
 
-function M.load(name)
+-- Names currently mid-load. Guards the dependency recursion against circular
+-- (A->B->A) or diamond specs that would otherwise re-enter an un-"loaded"
+-- plugin forever and overflow the stack. Cleared as soon as the deps loop
+-- finishes; from there the "loaded" status guard handles re-entry.
+local loading = {}
+
+function M.load(name, opts)
+  opts = opts or {}
   local plugins = state.get_plugins()
   local p = plugins[name]
-  if not p or p.status == "loaded" then return end
+  -- "error" plugins already failed to packadd; retrying just re-notifies on
+  -- every trigger. A real (re)install resets status to "installed" via load_fn.
+  if not p or p.status == "loaded" or p.status == "error" then return end
+  -- Never packadd/config a disabled plugin, even when reached as a dependency
+  -- or via :Pack load. disabled is otherwise only honored at flush/collect time.
+  if p.disabled then return end
+  if loading[name] then return end
+  loading[name] = true
 
   if p.dependencies then
     for _, dep in ipairs(p.dependencies) do
-      local dep_name
-      if type(dep) == "string" then
-        local match_name = dep:match("/([^/]+)$")
-        dep_name = match_name and match_name or dep
-        if dep_name:sub(-4) == ".git" then dep_name = dep_name:sub(1, -5) end
-      else
-        local match_name = dep[1] and dep[1]:match("/([^/]+)$")
-        dep_name = dep.as or (match_name and match_name or dep[1])
-        if dep_name and dep_name:sub(-4) == ".git" then dep_name = dep_name:sub(1, -5) end
-      end
+      -- Resolve via the same helper registration uses, so a dependency written
+      -- native-style ({ src=, name= }) or aliased ({ "o/r", name= }) resolves to
+      -- the key it was actually registered under.
+      local dep_name = state.derive_name(dep)
       if dep_name then
         M.load(dep_name)
       end
     end
   end
 
-  if p.cond ~= nil then
+  loading[name] = nil
+
+  if p.cond ~= nil and not opts.cond_checked then
     local cond_val = type(p.cond) == "function" and p.cond({ path = p.dir, spec = p }) or p.cond
     if not cond_val then return end
   end
 
+  -- A lazy plugin can be force-loaded (as another plugin's dependency, or via
+  -- :Pack load) while its triggers are still registered; tear them down so a
+  -- stale command/keymap/autocmd doesn't fire against an already-loaded plugin.
+  if p.lazy then
+    pcall(M.remove_triggers, p)
+  end
+
   local start_time = vim.uv.hrtime()
-  if packadd(name) then
+  local loaded_ok = p.is_local and load_local(p) or (not p.is_local and packadd(name))
+  if loaded_ok then
     state.update_status(name, "loaded")
+    gen_helptags(p.dir)
     local elapsed = (vim.uv.hrtime() - start_time) / 1e6
 
     if p.config then
@@ -399,6 +497,9 @@ function M.load(name)
     else
       p.load_time = elapsed
     end
+  else
+    -- packadd/local-load failed: record it so triggers stop re-attempting.
+    state.update_status(name, "error")
   end
 
   if package.loaded["pack.ui"] then

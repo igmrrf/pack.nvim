@@ -21,6 +21,27 @@ local function default_main(name)
   return name:match("^(.+)%.nvim$") or name
 end
 
+-- Single source of truth for a spec's registry key. Used by both normalize()
+-- (registration) and loader's dependency resolution so the two can never
+-- diverge. Accepts a bare "owner/repo" string, pack.nvim shorthand ({ "o/r",
+-- name=/as= }), or native-style ({ src=, name= }). Precedence: as > name >
+-- basename of url ([1] or src). Mirrors the naming in normalize().
+function M.derive_name(spec)
+  if type(spec) == "string" then
+    spec = { spec }
+  end
+  if type(spec) ~= "table" then
+    return nil
+  end
+  local url = spec[1] or spec.src
+  local match_name = type(url) == "string" and url:match("/([^/]+)$") or nil
+  local name = spec.as or spec.name or (match_name and match_name or url)
+  if type(name) == "string" and name:sub(-4) == ".git" then
+    name = name:sub(1, -5)
+  end
+  return name
+end
+
 -- Reject git refs that would be parsed as options (leading dash), e.g. a
 -- poisoned spec/lockfile value like "--upload-pack=...". These flow straight
 -- into `git` argv, so a ref starting with "-" is never legitimate.
@@ -53,16 +74,19 @@ local function normalize(plugin, config)
     return nil
   end
 
-  local match_name = url:match("/([^/]+)$")
-  local name = plugin.as or plugin.name or (match_name and match_name or url)
-  if name:sub(-4) == ".git" then
-    name = name:sub(1, -5)
-  end
-  
+  local name = M.derive_name(plugin)
+
+  -- A `dir=` spec is a LOCAL plugin: native vim.pack never clones it, we add its
+  -- directory to runtimepath and source it directly. The `[1]`/`src` value is
+  -- just a display name in this case, so `dir` wins as the source of truth.
+  local is_local = type(plugin.dir) == "string" and plugin.dir ~= ""
+
   -- Treat full URLs, scp-style git remotes, file:// URLs, and absolute/home
   -- local paths as-is; only bare "owner/repo" shorthand expands to GitHub.
   local full_url = url
-  if url:match("^~") then
+  if is_local then
+    full_url = vim.fn.expand(plugin.dir)
+  elseif url:match("^~") then
     full_url = vim.fn.expand(url)
   elseif not (url:match("^%w[%w+.-]*://") or url:match("^git@") or url:match("^/")) then
     full_url = "https://github.com/" .. url
@@ -71,8 +95,10 @@ local function normalize(plugin, config)
   local config_fn = plugin.config
   if not config_fn and plugin.opts then
     local main = plugin.main or default_main(name)
-    config_fn = function()
-      require(main).setup(plugin.opts)
+    -- Use the opts passed at load time (loader hands over p.opts) so a runtime
+    -- mutation is honored, falling back to the spec's opts if called bare.
+    config_fn = function(_, opts_arg)
+      require(main).setup(opts_arg ~= nil and opts_arg or plugin.opts)
     end
   end
 
@@ -114,14 +140,28 @@ local function normalize(plugin, config)
     pending_commits = nil,
     dependencies = dependencies,
     build = build,
-    local_dir = plugin.dir,
+    is_local = is_local,
+    local_dir = is_local and full_url or nil,
   }
+end
+
+-- Whether a spec opts into loading (its `enabled` is not false, evaluating a
+-- function form). Used to tell an intentionally-disabled spec apart from a
+-- genuinely invalid one so we don't warn about the former.
+local function is_enabled(plugin)
+  local e = type(plugin) == "table" and plugin.enabled
+  if type(e) == "function" then
+    e = e()
+  end
+  return e ~= false
 end
 
 function M.add_plugin(p, config)
   local normalized = normalize(p, config)
   if not normalized then
-    vim.notify("pack: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
+    if is_enabled(p) then
+      vim.notify("pack: skipping invalid plugin spec (missing url): " .. vim.inspect(p), vim.log.levels.WARN)
+    end
     return {}
   end
   
@@ -147,7 +187,12 @@ function M.add_plugin(p, config)
     -- Native vim.pack owns the install location; this is the authoritative path
     -- it will use. load_fn / reconcile_from_native confirm it post-install, but
     -- computing it here lets us show an accurate status before add() runs.
-    norm.dir = M.native_opt_dir() .. "/" .. norm.name
+    -- A local (`dir=`) plugin already carries its own on-disk path -- keep it.
+    if not norm.is_local then
+      norm.dir = M.native_opt_dir() .. "/" .. norm.name
+    else
+      norm.dir = norm.local_dir
+    end
 
     if vim.fn.isdirectory(norm.dir) == 1 then
       norm.status = "installed"
@@ -284,6 +329,10 @@ end
 -- `data`, which round-trips through vim.pack.get() and PackChanged payloads
 -- (functions survive vim.deepcopy by reference).
 function M.to_native_spec(p)
+  -- Local plugins are never handed to native vim.pack (nothing to clone).
+  if p.is_local then
+    return nil
+  end
   return {
     src = p.url,
     name = p.name,
