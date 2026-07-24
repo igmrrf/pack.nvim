@@ -1,13 +1,8 @@
--- Add this to your init.lua
-local pack_path = vim.fn.stdpath("data") .. "/site/pack/pack/opt/pack.nvim"
-
-if not vim.uv.fs_stat(pack_path) then
-  vim.fn.system({
-    "git", "clone", "--filter=blob:none",
-    "https://github.com/igmrrf/pack.nvim.git", "--branch=main", pack_path
-  })
-end
-vim.opt.rtp:prepend(pack_path)
+-- Add this to the very top of your init.lua.
+-- pack.nvim requires Neovim 0.12+ and delegates all installing/updating to the
+-- native vim.pack. Bootstrap pack.nvim itself with vim.pack, then hand off.
+vim.pack.add({ "https://github.com/igmrrf/pack.nvim" })
+vim.cmd.packadd("pack.nvim")
 
 require("pack").setup({
   plugins = {

@@ -37,10 +37,13 @@ require("pack").setup({
       end,
     },
 
-    -- Local plugins: load a plugin directly from your disk instead of git
+    -- Local / non-GitHub sources: pack.nvim passes absolute paths, file:// and
+    -- git@ URLs straight through to native vim.pack (only bare "owner/repo"
+    -- expands to GitHub). Native clones from the given source.
+    -- Note: unlike the old custom installer, there is no live symlink to an
+    -- editable working copy -- native installs a clone.
     {
-      "my-local-plugin",
-      dir = "~/projects/my-local-plugin",
+      "~/projects/my-local-plugin",
       config = function()
         require("my-local-plugin").setup()
       end
