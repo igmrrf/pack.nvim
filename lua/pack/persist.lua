@@ -18,13 +18,13 @@ function M._load_raw()
 
   local read_ok, lines = pcall(vim.fn.readfile, path)
   if not read_ok then
-    vim.notify("packui: failed to read " .. path, vim.log.levels.WARN)
+    vim.notify("pack: failed to read " .. path, vim.log.levels.WARN)
     return {}
   end
 
   local decode_ok, decoded = pcall(vim.json.decode, table.concat(lines, "\n"))
   if not decode_ok or type(decoded) ~= "table" then
-    vim.notify("packui: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
+    vim.notify("pack: " .. path .. " is not valid JSON, ignoring", vim.log.levels.WARN)
     return {}
   end
 
@@ -89,7 +89,7 @@ function M.save(set)
 
   local write_ok = pcall(vim.fn.writefile, lines, M.path())
   if not write_ok then
-    vim.notify("packui: failed to write " .. M.path(), vim.log.levels.ERROR)
+    vim.notify("pack: failed to write " .. M.path(), vim.log.levels.ERROR)
     return false
   end
   return true

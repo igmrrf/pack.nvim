@@ -1,10 +1,10 @@
-local persist = require("packui.persist")
+local persist = require("pack.persist")
 
-describe("packui.persist", function()
+describe("pack.persist", function()
   local tmp_path
 
   before_each(function()
-    tmp_path = vim.fn.tempname() .. "-packui-disabled.json"
+    tmp_path = vim.fn.tempname() .. "-pack-disabled.json"
     persist._set_path_for_testing(tmp_path)
   end)
 

@@ -1,8 +1,8 @@
-local async = require("packui.async")
-local state = require("packui.state")
-local persist = require("packui.persist")
+local async = require("pack.async")
+local state = require("pack.state")
+local persist = require("pack.persist")
 
-describe("packui.async.parse_behind_count", function()
+describe("pack.async.parse_behind_count", function()
   it("parses a well-formed count with trailing newline", function()
     assert.equals(3, async.parse_behind_count("3\n"))
   end)
@@ -24,11 +24,11 @@ describe("packui.async.parse_behind_count", function()
   end)
 end)
 
-describe("packui.async.check_outdated", function()
+describe("pack.async.check_outdated", function()
   local tmp_path
 
   before_each(function()
-    tmp_path = vim.fn.tempname() .. "-packui-disabled.json"
+    tmp_path = vim.fn.tempname() .. "-pack-disabled.json"
     persist._set_path_for_testing(tmp_path)
   end)
 
@@ -41,7 +41,7 @@ describe("packui.async.check_outdated", function()
 
   local function config_with(plugins)
     return {
-      install_path = vim.fn.tempname() .. "-packui-install",
+      install_path = vim.fn.tempname() .. "-pack-install",
       plugins = plugins,
     }
   end
@@ -106,7 +106,7 @@ describe("packui.async.check_outdated", function()
 
   it("runs the full check_outdated chain against a real local git repo", function()
     -- Build a real upstream repo with one commit.
-    local upstream_dir = vim.fn.tempname() .. "-packui-upstream"
+    local upstream_dir = vim.fn.tempname() .. "-pack-upstream"
     vim.fn.mkdir(upstream_dir, "p")
     local function run(cmd, cwd)
       vim.fn.system(cmd)
@@ -114,14 +114,14 @@ describe("packui.async.check_outdated", function()
     end
 
     run({ "git", "init", "-q", upstream_dir })
-    run({ "git", "-C", upstream_dir, "config", "user.email", "packui-test@example.com" })
-    run({ "git", "-C", upstream_dir, "config", "user.name", "packui-test" })
+    run({ "git", "-C", upstream_dir, "config", "user.email", "pack-test@example.com" })
+    run({ "git", "-C", upstream_dir, "config", "user.name", "pack-test" })
     vim.fn.writefile({ "hello" }, upstream_dir .. "/file.txt")
     run({ "git", "-C", upstream_dir, "add", "file.txt" })
     run({ "git", "-C", upstream_dir, "commit", "-q", "-m", "initial commit" })
 
     -- Clone it, simulating the plugin's install dir.
-    local clone_dir = vim.fn.tempname() .. "-packui-clone"
+    local clone_dir = vim.fn.tempname() .. "-pack-clone"
     run({ "git", "clone", "-q", upstream_dir, clone_dir })
 
     -- Make a second, pending commit upstream that the clone doesn't have yet.
@@ -158,7 +158,7 @@ describe("packui.async.check_outdated", function()
   end)
 end)
 
-describe("packui.async.parse_revision_pair", function()
+describe("pack.async.parse_revision_pair", function()
   it("splits two-line rev-parse output", function()
     local before, after = async.parse_revision_pair("abc123\ndef456\n")
     assert.equals("abc123", before)
@@ -178,7 +178,7 @@ describe("packui.async.parse_revision_pair", function()
   end)
 end)
 
-describe("packui.async.parse_upstream_branch_name", function()
+describe("pack.async.parse_upstream_branch_name", function()
   it("strips a single remote-name prefix", function()
     assert.equals("main", async.parse_upstream_branch_name("origin/main\n"))
   end)
@@ -197,7 +197,7 @@ describe("packui.async.parse_upstream_branch_name", function()
   end)
 end)
 
-describe("packui.async.parse_pending_commits", function()
+describe("pack.async.parse_pending_commits", function()
   it("splits multi-line git log output into a list", function()
     local commits = async.parse_pending_commits("abc123 │ fix: x\ndef456 │ feat: y")
     assert.same({ "abc123 │ fix: x", "def456 │ feat: y" }, commits)
@@ -209,17 +209,17 @@ describe("packui.async.parse_pending_commits", function()
   end)
 end)
 
-describe("packui.async.install", function()
+describe("pack.async.install", function()
   local function make_local_upstream()
-    local upstream_dir = vim.fn.tempname() .. "-packui-install-upstream"
+    local upstream_dir = vim.fn.tempname() .. "-pack-install-upstream"
     vim.fn.mkdir(upstream_dir, "p")
     local function run(cmd)
       vim.fn.system(cmd)
       assert.equals(0, vim.v.shell_error, table.concat(cmd, " ") .. " failed")
     end
     run({ "git", "init", "-q", upstream_dir })
-    run({ "git", "-C", upstream_dir, "config", "user.email", "packui-test@example.com" })
-    run({ "git", "-C", upstream_dir, "config", "user.name", "packui-test" })
+    run({ "git", "-C", upstream_dir, "config", "user.email", "pack-test@example.com" })
+    run({ "git", "-C", upstream_dir, "config", "user.name", "pack-test" })
     vim.fn.writefile({ "hello" }, upstream_dir .. "/file.txt")
     run({ "git", "-C", upstream_dir, "add", "file.txt" })
     run({ "git", "-C", upstream_dir, "commit", "-q", "-m", "initial commit" })
@@ -228,15 +228,15 @@ describe("packui.async.install", function()
 
   it("clones a missing non-lazy plugin and hands off to loader.load", function()
     local upstream_dir = make_local_upstream()
-    local install_dir = vim.fn.tempname() .. "-packui-install-dir"
+    local install_dir = vim.fn.tempname() .. "-pack-install-dir"
 
-    state.init({ install_path = vim.fn.tempname() .. "-packui-install", plugins = { "user/fixture-nonlazy.nvim" } })
+    state.init({ install_path = vim.fn.tempname() .. "-pack-install", plugins = { "user/fixture-nonlazy.nvim" } })
     local p = state.get_plugins()["fixture-nonlazy.nvim"]
     p.url = upstream_dir
     p.dir = install_dir
     p.lazy = false
 
-    local loader = require("packui.loader")
+    local loader = require("pack.loader")
     local load_called_with = nil
     local original_load = loader.load
     loader.load = function(name) load_called_with = name end
@@ -260,20 +260,20 @@ describe("packui.async.install", function()
   it("clones a missing lazy plugin and wires up its triggers instead of loading it immediately", function()
     -- Regression test: loader.init() only registers cmd/event/ft/keys
     -- triggers for plugins already on disk at startup. A lazy plugin
-    -- installed live via :PackuiSync used to end up "installed" with no
+    -- installed live via :Pack sync used to end up "installed" with no
     -- trigger ever wired up - it would silently never lazy-load until the
     -- next Neovim restart.
     local upstream_dir = make_local_upstream()
-    local install_dir = vim.fn.tempname() .. "-packui-install-dir"
+    local install_dir = vim.fn.tempname() .. "-pack-install-dir"
 
-    state.init({ install_path = vim.fn.tempname() .. "-packui-install", plugins = { "user/fixture-lazy.nvim" } })
+    state.init({ install_path = vim.fn.tempname() .. "-pack-install", plugins = { "user/fixture-lazy.nvim" } })
     local p = state.get_plugins()["fixture-lazy.nvim"]
     p.url = upstream_dir
     p.dir = install_dir
     p.lazy = true
-    p.cmd = "PackuiFixtureLazyCmd"
+    p.cmd = "PackFixtureLazyCmd"
 
-    local loader = require("packui.loader")
+    local loader = require("pack.loader")
     local load_called = false
     local setup_triggers_called_with = nil
     local original_load = loader.load
@@ -303,10 +303,10 @@ describe("packui.async.install", function()
   end)
 end)
 
-describe("packui.async.sync", function()
+describe("pack.async.sync", function()
   it("skips disabled plugins entirely", function()
-    local state = require("packui.state")
-    local persist = require("packui.persist")
+    local state = require("pack.state")
+    local persist = require("pack.persist")
     local tmp_path = vim.fn.tempname() .. "-disabled.json"
     persist._set_path_for_testing(tmp_path)
 

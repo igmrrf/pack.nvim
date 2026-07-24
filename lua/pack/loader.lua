@@ -1,4 +1,4 @@
-local state = require("packui.state")
+local state = require("pack.state")
 
 local M = {}
 
@@ -32,7 +32,7 @@ local function normalize_key_entries(raw)
   return entries
 end
 
--- Entries with an explicit rhs are mapped directly (mirrors packui.map_keys).
+-- Entries with an explicit rhs are mapped directly (mirrors pack.map_keys).
 -- Bare-lhs entries only make sense on a lazy plugin: pressing the key loads
 -- the plugin then replays the keypress so the plugin's own mapping fires.
 local function setup_keys(p)
@@ -41,7 +41,7 @@ local function setup_keys(p)
     if not p.lazy then
       if entry.rhs == nil then
         vim.notify(
-          "packui: '" .. p.name .. "' keys entry '" .. lhs .. "' has no rhs and the plugin isn't lazy - nothing to bind",
+          "pack: '" .. p.name .. "' keys entry '" .. lhs .. "' has no rhs and the plugin isn't lazy - nothing to bind",
           vim.log.levels.WARN
         )
       else
@@ -73,7 +73,7 @@ local function setup_keys(p)
           replay()
         end
       end
-      local trigger_opts = vim.tbl_extend("force", { desc = "packui: lazy-load " .. p.name }, entry.opts)
+      local trigger_opts = vim.tbl_extend("force", { desc = "pack: lazy-load " .. p.name }, entry.opts)
       for _, mode in ipairs(entry.modes) do
         vim.keymap.set(mode, lhs, trigger, trigger_opts)
       end
@@ -86,7 +86,7 @@ local seen_cmds = {}
 function M.setup_triggers(p)
   local group
   if p.event or p.ft then
-    group = vim.api.nvim_create_augroup("packui_trigger_" .. p.name, { clear = true })
+    group = vim.api.nvim_create_augroup("pack_trigger_" .. p.name, { clear = true })
   end
 
   if p.cmd then
@@ -94,7 +94,7 @@ function M.setup_triggers(p)
     for _, cmd in ipairs(cmds) do
       if seen_cmds[cmd] and seen_cmds[cmd] ~= p.name then
         vim.notify(
-          "packui: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
+          "pack: command '" .. cmd .. "' already registered by " .. seen_cmds[cmd] .. ", overwriting for " .. p.name,
           vim.log.levels.WARN
         )
       end
@@ -165,7 +165,7 @@ function M.setup_triggers(p)
 end
 
 function M.remove_triggers(p)
-  pcall(vim.api.nvim_del_augroup_by_name, "packui_trigger_" .. p.name)
+  pcall(vim.api.nvim_del_augroup_by_name, "pack_trigger_" .. p.name)
 
   if p.cmd then
     local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
@@ -198,8 +198,8 @@ function M.enable(p)
 end
 
 function M.build_cache()
-  local cache_file = vim.fn.stdpath("data") .. "/packui_ftdetect_cache.lua"
-  local plugins = require("packui.state").get_plugins()
+  local cache_file = vim.fn.stdpath("data") .. "/pack_ftdetect_cache.lua"
+  local plugins = require("pack.state").get_plugins()
   local lines = {}
   for _, p in pairs(plugins) do
     if not p.disabled and p.status == "installed" then
@@ -217,7 +217,7 @@ function M.build_cache()
 end
 
 function M.init(config)
-  pcall(dofile, vim.fn.stdpath("data") .. "/packui_ftdetect_cache.lua")
+  pcall(dofile, vim.fn.stdpath("data") .. "/pack_ftdetect_cache.lua")
 
   -- Intercept requires for disabled plugins to prevent configuration crashes.
   -- If a disabled module is required directly (not inside pcall), we return a deep mock table.
@@ -269,7 +269,7 @@ function M.init(config)
   local packpath_root = vim.fn.fnamemodify(config.install_path, ":h:h")
   if vim.fn.fnamemodify(config.install_path, ":h:t") ~= "pack" then
     vim.notify(
-      "packui: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
+      "pack: install_path '" .. config.install_path .. "' should end in 'pack/<name>' for :packadd to find plugins",
       vim.log.levels.WARN
     )
   end
@@ -282,15 +282,21 @@ function M.init(config)
       if p.lazy and p.status == "installed" then
         M.setup_triggers(p)
       elseif not p.lazy and p.status == "installed" then
+        local start_time = vim.uv.hrtime()
         if packadd(p.name) then
           state.update_status(p.name, "loaded")
+          local elapsed = (vim.uv.hrtime() - start_time) / 1e6
           if p.config then
             vim.schedule(function()
+              local config_start = vim.uv.hrtime()
               local ok, err = pcall(p.config)
+              p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
               if not ok then
                 vim.notify("Error loading config for " .. p.name .. ": " .. tostring(err), vim.log.levels.ERROR)
               end
             end)
+          else
+            p.load_time = elapsed
           end
         end
       end
@@ -307,19 +313,43 @@ function M.load(name)
   local p = plugins[name]
   if not p or p.status == "loaded" then return end
 
-  if packadd(name) then
-    state.update_status(name, "loaded")
-
-    if p.config then
-      local ok, err = pcall(p.config)
-      if not ok then
-        vim.notify("Error loading config for " .. name .. ": " .. tostring(err), vim.log.levels.ERROR)
+  if p.dependencies then
+    for _, dep in ipairs(p.dependencies) do
+      local dep_name
+      if type(dep) == "string" then
+        local match_name = dep:match("/([^/]+)$")
+        dep_name = match_name and match_name or dep
+        if dep_name:sub(-4) == ".git" then dep_name = dep_name:sub(1, -5) end
+      else
+        local match_name = dep[1] and dep[1]:match("/([^/]+)$")
+        dep_name = dep.as or (match_name and match_name or dep[1])
+        if dep_name and dep_name:sub(-4) == ".git" then dep_name = dep_name:sub(1, -5) end
+      end
+      if dep_name then
+        M.load(dep_name)
       end
     end
   end
 
-  if package.loaded["packui.ui"] then
-    require("packui.ui").update()
+  local start_time = vim.uv.hrtime()
+  if packadd(name) then
+    state.update_status(name, "loaded")
+    local elapsed = (vim.uv.hrtime() - start_time) / 1e6
+
+    if p.config then
+      local config_start = vim.uv.hrtime()
+      local ok, err = pcall(p.config)
+      p.load_time = elapsed + (vim.uv.hrtime() - config_start) / 1e6
+      if not ok then
+        vim.notify("Error loading config for " .. name .. ": " .. tostring(err), vim.log.levels.ERROR)
+      end
+    else
+      p.load_time = elapsed
+    end
+  end
+
+  if package.loaded["pack.ui"] then
+    require("pack.ui").update()
   end
 end
 

@@ -1,11 +1,11 @@
-local state = require("packui.state")
-local persist = require("packui.persist")
+local state = require("pack.state")
+local persist = require("pack.persist")
 
-describe("packui.state", function()
+describe("pack.state", function()
   local tmp_path
 
   before_each(function()
-    tmp_path = vim.fn.tempname() .. "-packui-disabled.json"
+    tmp_path = vim.fn.tempname() .. "-pack-disabled.json"
     persist._set_path_for_testing(tmp_path)
   end)
 
@@ -18,7 +18,7 @@ describe("packui.state", function()
 
   local function config_with(plugins)
     return {
-      install_path = vim.fn.tempname() .. "-packui-install",
+      install_path = vim.fn.tempname() .. "-pack-install",
       plugins = plugins,
     }
   end

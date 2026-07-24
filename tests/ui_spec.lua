@@ -1,10 +1,10 @@
-local ui = require("packui.ui")
-local state = require("packui.state")
-local persist = require("packui.persist")
+local ui = require("pack.ui")
+local state = require("pack.state")
+local persist = require("pack.persist")
 
 local function config_with(plugins)
   return {
-    install_path = vim.fn.tempname() .. "-packui-install",
+    install_path = vim.fn.tempname() .. "-pack-install",
     ui = {
       border = "rounded",
       icons = { loaded = "*", not_loaded = "o", error = "x", sync = "~" },
@@ -33,7 +33,7 @@ local function close_all_but_one_window()
   assert.equals(1, #vim.api.nvim_list_wins())
 end
 
-describe("packui.ui", function()
+describe("pack.ui", function()
   local tmp_path
 
   before_each(function()
@@ -58,30 +58,30 @@ describe("packui.ui", function()
       local buf = vim.api.nvim_get_current_buf()
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local text = table.concat(lines, "\n")
-      assert.is_true(text:match("Packui Keymaps") ~= nil)
+      assert.is_true(text:match("Pack Keymaps") ~= nil)
       assert.is_true(text:match("close") ~= nil)
     end)
 
-    it("wires '?' to open the help popup", function()
+    it("wires 'g?' to open the help popup", function()
       local config = config_with({ "user/foo.nvim" })
       state.init(config)
       ui.open(config)
       local dashboard_buf = vim.api.nvim_get_current_buf()
 
       -- Verify the keymap exists and is buffer-local
-      local mapping = vim.fn.maparg("?", "n", false, true)
+      local mapping = vim.fn.maparg("g?", "n", false, true)
       assert.is_not_nil(mapping)
       assert.is_true(mapping.buffer == 1)
 
       -- Trigger the keymap and verify it opens the help popup
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("?", true, false, true), "mtx", false)
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("g?", true, false, true), "mtx", false)
       local popup_buf = vim.api.nvim_get_current_buf()
       assert.are_not_equal(dashboard_buf, popup_buf)
 
       -- Verify help content is displayed
       local lines = vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false)
       local text = table.concat(lines, "\n")
-      assert.is_true(text:match("Packui Keymaps") ~= nil)
+      assert.is_true(text:match("Pack Keymaps") ~= nil)
     end)
   end)
 
@@ -180,7 +180,7 @@ describe("packui.ui", function()
       ui.toggle_disabled()
 
       assert.is_true(state.get_plugins()["foo.nvim"].disabled)
-      assert.is_true(require("packui.persist").load()["foo.nvim"])
+      assert.is_true(require("pack.persist").load()["foo.nvim"])
 
       ui.cycle_tab() -- all -> outdated
       ui.cycle_tab() -- outdated -> disabled
@@ -203,7 +203,7 @@ describe("packui.ui", function()
       ui.toggle_disabled()
 
       assert.is_false(state.get_plugins()["foo.nvim"].disabled)
-      assert.is_nil(require("packui.persist").load()["foo.nvim"])
+      assert.is_nil(require("pack.persist").load()["foo.nvim"])
     end)
 
     it("disabling an already-loaded plugin warns but does not error", function()
@@ -334,7 +334,7 @@ describe("packui.ui", function()
       local line = find_line(buf, "foo%.nvim")
       vim.api.nvim_win_set_cursor(0, { line, 0 })
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local called_with = nil
       local original = async.update_plugin
       async.update_plugin = function(p) called_with = p.name end
@@ -354,7 +354,7 @@ describe("packui.ui", function()
       local line = find_line(buf, "foo%.nvim")
       vim.api.nvim_win_set_cursor(0, { line, 0 })
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local called = false
       local original = async.update_plugin
       async.update_plugin = function() called = true end
@@ -373,7 +373,7 @@ describe("packui.ui", function()
       ui.open(config)
       ui.cycle_tab() -- all -> outdated
 
-      local async = require("packui.async")
+      local async = require("pack.async")
       local updated = {}
       local original = async.update_plugin
       async.update_plugin = function(p) table.insert(updated, p.name) end
