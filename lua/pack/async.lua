@@ -282,9 +282,19 @@ end
 -- force=true skips native's confirmation buffer -- the dashboard IS the
 -- confirmation, so an in-dashboard `u`/`U` updates immediately.
 function M.update_plugin(plugin)
+  M.update_plugins({ plugin.name })
+end
+
+-- Update many plugins in ONE native call. Calling native update once per plugin
+-- spawns one blocking progress job apiece ("vim.pack: 100% updating (1/1)"
+-- stacking N times); a single batched call shows one aggregated progress.
+function M.update_plugins(names)
+  if not names or #names == 0 then
+    return
+  end
   local pack = require("pack")
   if pack.native_pack and pack.native_pack.update then
-    pack.native_pack.update({ plugin.name }, { force = true })
+    pack.native_pack.update(names, { force = true })
   end
 end
 

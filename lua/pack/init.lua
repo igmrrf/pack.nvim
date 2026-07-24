@@ -258,27 +258,8 @@ function M.setup(opts)
     elseif subcmd == "restore" then
       M.native_pack.update(nil, { target = "lockfile" })
     elseif subcmd == "profile" then
-      local plugins = state.get_plugins()
-      local profiles = {}
-      for _, p in pairs(plugins) do
-        if p.load_time then
-          table.insert(profiles, p)
-        end
-      end
-      table.sort(profiles, function(a, b) return a.load_time > b.load_time end)
-      
-      local lines = { "  Pack Startup Profile", "  ====================" }
-      for _, p in ipairs(profiles) do
-        table.insert(lines, string.format("  %8.2f ms  %s", p.load_time, p.name))
-      end
-      
-      if #profiles == 0 then table.insert(lines, "  No profiles recorded.") end
-      
-      local buf = vim.api.nvim_create_buf(false, true)
-      vim.bo[buf].bufhidden = "wipe"
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-      vim.api.nvim_command("split")
-      vim.api.nvim_win_set_buf(0, buf)
+      ui.open(M.config)
+      ui.show_profile()
     else
       ui.open(M.config)
     end
