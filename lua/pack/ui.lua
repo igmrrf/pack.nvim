@@ -58,6 +58,7 @@ local KEYMAP_HELP = {
   { key = "Enter", scope = "all", desc = "toggle inline details for plugin" },
   { key = "K", scope = "all", desc = "full details (commit info) in popup" },
   { key = "l", scope = "all", desc = "view install/update logs" },
+  { key = "p", scope = "all", desc = "show startup profile (load times)" },
   { key = "x", scope = "All, Disabled", desc = "toggle disable/enable" },
   { key = "c", scope = "all", desc = "check for outdated plugins" },
   { key = "u", scope = "Outdated", desc = "update plugin" },
@@ -193,11 +194,13 @@ end
 
 function M.update_all_outdated()
   if current_tab ~= "outdated" then return end
+  local names = {}
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      require("pack.async").update_plugin(p)
+      table.insert(names, p.name)
     end
   end
+  require("pack.async").update_plugins(names)
 end
 
 function M.open(config)
@@ -243,6 +246,7 @@ function M.open(config)
   vim.keymap.set("n", "<CR>", "<Cmd>lua require('pack.ui').toggle_details()<CR>", opts)
   vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
   vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
+  vim.keymap.set("n", "p", "<Cmd>lua require('pack.ui').show_profile()<CR>", opts)
   vim.keymap.set("n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
   vim.keymap.set("n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
   vim.keymap.set("n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
@@ -255,6 +259,32 @@ function M.open(config)
 
   M.update()
   require("pack.async").check_all_outdated()
+end
+
+function M.show_profile()
+  local profiles = {}
+  for _, p in pairs(state.get_plugins()) do
+    if p.load_time then
+      table.insert(profiles, p)
+    end
+  end
+  table.sort(profiles, function(a, b) return a.load_time > b.load_time end)
+
+  local lines = { "  Pack Startup Profile", "  ====================", "" }
+  local total = 0
+  for _, p in ipairs(profiles) do
+    total = total + p.load_time
+    table.insert(lines, string.format("  %8.2f ms  %s", p.load_time, p.name))
+  end
+  if #profiles == 0 then
+    table.insert(lines, "  No profiles recorded.")
+  else
+    table.insert(lines, "")
+    table.insert(lines, string.format("  %8.2f ms  (total, %d plugins)", total, #profiles))
+  end
+
+  local buf = open_popup(lines, { close_keys = { "q", "p", "<Esc>" } })
+  vim.bo[buf].filetype = "pack_profile"
 end
 
 function M.show_log()
@@ -275,6 +305,9 @@ local function add_plugin_details(p, lines, highlights, indent)
       plugin_map[#lines] = p
       table.insert(highlights, { line = #lines - 1, col_start = #indent, col_end = -1, hl = "Comment" })
     end
+    -- Breathing room below an expanded plugin's info block.
+    table.insert(lines, "")
+    plugin_map[#lines] = p
   end
 end
 
@@ -340,7 +373,6 @@ local function render_outdated_tab(lines, highlights)
 
   table.insert(lines, "  Outdated (" .. #outdated .. ")")
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
-  table.insert(lines, "")
 
   for _, p in ipairs(outdated) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
@@ -371,6 +403,9 @@ local function render_outdated_tab(lines, highlights)
           table.insert(highlights, { line = #lines - 1, col_start = 6, col_end = -1, hl = "Comment" })
         end
       end
+      -- Breathing room below an expanded plugin's info block.
+      table.insert(lines, "")
+      plugin_map[#lines] = p
     end
   end
 end
