@@ -130,8 +130,12 @@ function M.add(specs)
   local items = specs
   if type(specs) == "string" then
     items = { specs }
-  elseif type(specs) == "table" and not specs[1] and specs.src then
-    items = { specs }
+  elseif type(specs) == "table" then
+    if not (#specs > 1 or type(specs[1]) == "table") then
+      if specs[1] or specs.src then
+        items = { specs }
+      end
+    end
   end
 
   local added = {}
