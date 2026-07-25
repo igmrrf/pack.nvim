@@ -142,6 +142,7 @@ local function normalize(plugin, config)
     build = build,
     is_local = is_local,
     local_dir = is_local and full_url or nil,
+    managed = true,
   }
 end
 
@@ -290,19 +291,44 @@ function M.reconcile_from_native(native_pack)
     rtp[vim.fs.normalize(path)] = true
   end
 
+  local adopted = 0
   for _, entry in ipairs(list) do
     local name = entry.spec and entry.spec.name
-    local p = name and M.plugins[name]
-    if p then
-      p.dir = entry.path or p.dir
-      p.rev = entry.rev or p.rev
-      if p.status == "missing" then
-        p.status = "installed"
-      end
-      if p.status == "installed" and p.dir and rtp[vim.fs.normalize(p.dir)] then
-        p.status = "loaded"
+    if name then
+      local p = M.plugins[name]
+      if p then
+        -- Managed or already-adopted record: refresh from native, keep `managed`.
+        p.dir = entry.path or p.dir
+        p.rev = entry.rev or p.rev
+        if p.status == "missing" then
+          p.status = "installed"
+        end
+        if p.status == "installed" and p.dir and rtp[vim.fs.normalize(p.dir)] then
+          p.status = "loaded"
+        end
+      else
+        -- Unknown to pack.nvim: adopt it (present in native, never declared).
+        local on_rtp = entry.path and rtp[vim.fs.normalize(entry.path)] or false
+        M.plugins[name] = {
+          name = name,
+          url = entry.spec and entry.spec.src or nil,
+          dir = entry.path or "",
+          rev = entry.rev,
+          status = on_rtp and "loaded" or ((entry.path and entry.path ~= "") and "installed" or "missing"),
+          managed = false,
+          disabled = false,
+          lazy = false,
+          priority = 50,
+          log = {},
+          dependencies = {},
+          is_local = false,
+        }
+        adopted = adopted + 1
       end
     end
+  end
+  if adopted > 0 then
+    M.generation = M.generation + 1
   end
 end
 

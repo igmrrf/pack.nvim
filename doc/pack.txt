@@ -51,6 +51,27 @@ In the dashboard, you can use the following default mappings:
     `U`        - Update all outdated plugins
 
 ==============================================================================
+KNOWN LIMITATIONS                                            *pack-limitations*
+
+Mixing native |vim.pack| calls with pack.nvim's declarative spec has two
+sharp edges:
+
+- A plugin installed by a raw `vim.pack.add()` call BEFORE
+  `require('pack').setup()` that is ALSO declared in `setup()` with a
+  `config`/`opts` will NOT have its pack.nvim `config` run, because native
+  `vim.pack` already activated it and early-returns for already-active
+  plugins. Declare such plugins only through pack.nvim, or avoid pre-setup
+  raw adds for plugins that need `config`.
+- When mixing imperative `vim.pack.add` calls inside `{ import = ... }`
+  files with declarative specs, eager-load `priority` ordering is only
+  guaranteed among declarative plugins; imperative-import plugins load in
+  import order during `setup()`, not in the global priority sort.
+- If the same plugin is registered both by an imperative `vim.pack.add`
+  during an import and by a declarative spec, the first registration wins
+  and the later spec's fields (lazy/config/keys/opts) are silently ignored;
+  declare each plugin once, in one style.
+
+==============================================================================
 CONFIGURATION                                                *pack-configuration*
 
 `pack.add(plugins, opts)` accepts an `opts` table for configuration:

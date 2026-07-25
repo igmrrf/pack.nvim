@@ -223,6 +223,7 @@ local function quick_detail_lines(p)
   return {
     "url:      " .. p.url,
     "status:   " .. p.status,
+    "managed:  " .. ((p.managed == false) and "no (native — lazy/config not controlled by pack.nvim)" or "yes"),
     "dir:      " .. p.dir,
     "lazy:     " .. tostring(p.lazy),
     "trigger:  " .. trigger_summary(p),
@@ -270,6 +271,11 @@ function M.toggle_disabled()
   end
   local p = plugin_at_cursor()
   if not p then return end
+
+  if p.managed == false then
+    vim.notify("pack: '" .. p.name .. "' is native/adopted — pack.nvim does not control its loading", vim.log.levels.WARN)
+    return
+  end
 
   local new_disabled = not p.disabled
   state.set_disabled(p.name, new_disabled)
@@ -451,15 +457,19 @@ local function render_all_tab(lines, highlights)
       table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
       for _, p in ipairs(list) do
         local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-        local line = string.format("    %s %s %s", expand_icon, icon, p.name)
+        local tag = (p.managed == false) and "  (native)" or ""
+        local line = string.format("    %s %s %s%s", expand_icon, icon, p.name, tag)
         table.insert(lines, line)
         plugin_map[#lines] = p
-        
+
         table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
         local icon_start = 8
         local icon_end = 8 + #icon
         table.insert(highlights, { line = #lines - 1, col_start = icon_start, col_end = icon_end, hl = hl_group })
-        
+        if p.managed == false then
+          table.insert(highlights, { line = #lines - 1, col_start = #line - #"  (native)", col_end = -1, hl = "Comment" })
+        end
+
         add_plugin_details(p, lines, highlights, "      ")
       end
       table.insert(lines, "")
@@ -550,9 +560,15 @@ local function render_disabled_tab(lines, highlights)
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
   for _, p in ipairs(disabled) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-    table.insert(lines, string.format("    %s %s (%s)", expand_icon, p.name, p.status))
+    local tag = (p.managed == false) and "  (native)" or ""
+    local line = string.format("    %s %s%s (%s)", expand_icon, p.name, tag, p.status)
+    table.insert(lines, line)
     plugin_map[#lines] = p
     table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
+    if p.managed == false then
+      local tag_start = 4 + #expand_icon + 1 + #p.name
+      table.insert(highlights, { line = #lines - 1, col_start = tag_start, col_end = tag_start + #tag, hl = "Comment" })
+    end
     add_plugin_details(p, lines, highlights, "      ")
   end
 end
