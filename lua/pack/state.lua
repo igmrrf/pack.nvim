@@ -314,7 +314,7 @@ function M.reconcile_from_native(native_pack)
           url = entry.spec and entry.spec.src or nil,
           dir = entry.path or "",
           rev = entry.rev,
-          status = on_rtp and "loaded" or "installed",
+          status = on_rtp and "loaded" or ((entry.path and entry.path ~= "") and "installed" or "missing"),
           managed = false,
           disabled = false,
           lazy = false,

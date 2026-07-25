@@ -560,9 +560,15 @@ local function render_disabled_tab(lines, highlights)
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
   for _, p in ipairs(disabled) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-    table.insert(lines, string.format("    %s %s (%s)", expand_icon, p.name, p.status))
+    local tag = (p.managed == false) and "  (native)" or ""
+    local line = string.format("    %s %s%s (%s)", expand_icon, p.name, tag, p.status)
+    table.insert(lines, line)
     plugin_map[#lines] = p
     table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
+    if p.managed == false then
+      local tag_start = 4 + #expand_icon + 1 + #p.name
+      table.insert(highlights, { line = #lines - 1, col_start = tag_start, col_end = tag_start + #tag, hl = "Comment" })
+    end
     add_plugin_details(p, lines, highlights, "      ")
   end
 end
