@@ -202,6 +202,12 @@ function M.setup(opts)
   loader.init(M.config)
   require("pack.async").setup_build_hooks()
 
+  -- Establish a clean state table ONCE, before the wrapper is installed, so a
+  -- re-setup()/test starts fresh and any nested vim.pack.add during load_plugins
+  -- lands on an empty table. We deliberately do NOT call state.init again after
+  -- load_plugins: that would wipe records the wrapper registered during import.
+  state.init({ plugins = {} })
+
   -- Lazy-aware wrapper installed BEFORE load_plugins so imperative vim.pack.add
   -- calls (including files pulled in by `import`) route through pack.nvim.
   vim.pack = setmetatable({}, { __index = M.native_pack })
@@ -228,7 +234,12 @@ function M.setup(opts)
   local plugins = load_plugins(raw_plugins)
   M.config.plugins = plugins or M.config.plugins
 
-  state.init(M.config)
+  -- Register declarative specs ADDITIVELY. add_plugin dedups by name, so any
+  -- plugin an imperative import already registered (managed=true) via the
+  -- wrapper is preserved with its full metadata and not clobbered/double-added.
+  for _, p in ipairs(M.config.plugins) do
+    state.add_plugin(p, M.config)
+  end
 
   -- Install (native) + load (ours) every configured, non-disabled plugin.
   M._install_and_load(collect_native_specs(state.get_plugins()), false)

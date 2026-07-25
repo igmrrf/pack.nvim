@@ -190,4 +190,45 @@ describe("pack.init native delegation", function()
     assert.is_not_nil(a)
     assert.is_false(a.managed)
   end)
+
+  it("keeps wrapper-added (imperative import) plugins managed alongside declarative specs", function()
+    -- Faithfully reproduce Feature B: an imported file calls the wrapped
+    -- vim.pack.add DURING load_plugins (i.e. during setup, before any state
+    -- rebuild). Build a real runtime module on rtp that does exactly that.
+    local rtp_dir = vim.fn.tempname() .. "-pack-imp"
+    local mod_name = "pack_imp_" .. tostring(vim.uv and vim.uv.hrtime() or os.clock()):gsub("%.", "_")
+    local mod_dir = rtp_dir .. "/lua/" .. mod_name
+    vim.fn.mkdir(mod_dir, "p")
+    vim.fn.writefile({
+      'vim.pack.add({ { src = "https://github.com/user/imp.nvim", name = "imp.nvim" } })',
+      "return {}",
+    }, mod_dir .. "/plugins.lua")
+    vim.opt.runtimepath:prepend(rtp_dir)
+
+    -- Fake native: .add is a no-op recorder, .get returns {} so reconcile does
+    -- not adopt/overwrite anything. Restored by the describe after_each.
+    vim.pack = {
+      add = function() end,
+      get = function() return {} end,
+      del = function() end,
+      update = function() end,
+    }
+
+    require("pack").setup({ plugins = { "user/decl.nvim", { import = mod_name } } })
+
+    -- Module is only needed during setup's load_plugins; clean it off rtp now.
+    package.loaded[mod_name .. ".plugins"] = nil
+    vim.opt.runtimepath:remove(rtp_dir)
+    vim.fn.delete(rtp_dir, "rf")
+
+    local plugins = state.get_plugins()
+    -- Declarative spec survived (setup registers additively, not via a
+    -- destructive state.init that would wipe the import-time record).
+    assert.is_not_nil(plugins["decl.nvim"])
+    assert.is_true(plugins["decl.nvim"].managed)
+    -- The imperative wrapper-added spec (added during import) is present and
+    -- MANAGED (Feature B), not wiped and not demoted to managed=false.
+    assert.is_not_nil(plugins["imp.nvim"])
+    assert.is_true(plugins["imp.nvim"].managed)
+  end)
 end)
