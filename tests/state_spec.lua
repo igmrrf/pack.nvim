@@ -151,6 +151,10 @@ describe("pack.state", function()
     assert.equals("loaded", a.status) -- path is on runtimepath
     assert.equals(50, a.priority)
     assert.is_false(a.disabled)
+    assert.is_false(a.lazy)
+    assert.same({}, a.log)
+    assert.same({}, a.dependencies)
+    assert.is_false(a.is_local)
   end)
 
   it("reconcile_from_native does not overwrite a managed entry on name collision", function()

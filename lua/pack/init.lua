@@ -238,6 +238,14 @@ function M.setup(opts)
   -- plugin an imperative import already registered (managed=true) via the
   -- wrapper is preserved with its full metadata and not clobbered/double-added.
   for _, p in ipairs(M.config.plugins) do
+    local nm = state.derive_name(p)
+    if nm and state.get_plugins()[nm] then
+      vim.notify(
+        ("pack: '%s' was already registered (e.g. via an imperative vim.pack.add during import); "
+          .. "keeping the first registration and ignoring the later declarative spec's fields"):format(nm),
+        vim.log.levels.WARN
+      )
+    end
     state.add_plugin(p, M.config)
   end
 

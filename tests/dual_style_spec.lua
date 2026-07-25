@@ -32,9 +32,8 @@ describe("pack.nvim dual-style plugin tracking (end-to-end)", function()
   it("tracks declarative, wrapped-imperative, and adopted plugins together", function()
     local pack = require("pack")
     local state = require("pack.state")
-    local added = {}
     vim.pack = {
-      add = function(specs) for _, s in ipairs(specs) do added[s.name] = true end end,
+      add = function() end,
       get = function()
         return { { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = "/x/adopted.nvim" } }
       end,

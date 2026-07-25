@@ -195,6 +195,19 @@ After `setup()`, pack.nvim replaces the global `vim.pack.add`/`vim.pack.update`/
 lazy-aware wrappers, so you can keep calling `vim.pack.add({ ... })` and it flows through pack.nvim's
 loader. The install location and lockfile are owned by native `vim.pack` and are not configurable.
 
+#### Known limitations when mixing styles
+
+*   **Raw `vim.pack.add` before `setup()`, then declared with `config`/`opts`**: if a plugin is
+    installed/activated via a *raw* `vim.pack.add()` call before `require('pack').setup()` runs, and
+    is *also* declared in your `plugins` spec with a `config` or `opts`, that `config` will **not**
+    run. Native `vim.pack` already considers the plugin active and early-returns when pack.nvim's
+    wrapper re-adds it, so our loader never gets a chance to fire. Either declare such plugins only
+    through pack.nvim, or avoid raw pre-`setup()` adds for anything that needs a `config`.
+*   **Imperative imports vs. declarative priority ordering**: eager-load `priority` ordering is only
+    guaranteed *among declarative plugins*. Plugins registered via imperative `vim.pack.add` calls
+    inside `{ import = ... }` files load in import order during `setup()`, not as part of the global
+    priority sort.
+
 ### Bulk keymaps
 
 `require("pack").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
