@@ -235,7 +235,8 @@ require("pack").map_keys({
 | `:Pack build [name]` | Re-runs the `build` hook for one plugin (or all plugins). |
 | `:Pack load <name>` | Immediately loads a lazy plugin. |
 | `:Pack delete <name>` | Removes a plugin from state and deletes it via native `vim.pack`. |
-| `:Pack profile` | Displays the startup profile showing plugin load times. |
+| `:Pack profile` | Displays the startup profile with visual bar charts showing plugin load times. |
+| `:Pack diff` | Displays a structured diff of pending commits for outdated plugins before updating. |
 
 Subcommands with a `<name>` argument tab-complete against your configured plugins.
 
@@ -248,14 +249,15 @@ When inside the dashboard (opened via `:Pack`), you can use the following keymap
 *   `S` - Start a Sync operation (install/update).
 *   `Tab` (or `1`/`2`/`3`) - Cycle tabs: All -> Outdated -> Disabled.
 *   `<Enter>` - Quick details for the plugin under the cursor.
-*   `K` - Full details (includes current commit) for the plugin under the cursor.
+*   `K` - Full details (includes branch, working tree status, and current commit) for the plugin under the cursor.
 *   `l` - Show git output logs for the plugin under the cursor.
-*   `p` - Show the startup profile.
+*   `p` - Show the startup profile with visual bar chart.
+*   `d` - View pending updates diff for outdated plugins.
 *   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs); see [Disabling plugins](#-disabling-plugins). An already-loaded plugin needs a restart to fully unload.
 *   `c` - Check for outdated plugins (concurrency-limited `git fetch`, skipping any checked within the last few minutes).
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
-*   `/` - Filter the dashboard by plugin name (substring match).
+*   `/` - Filter the dashboard by plugin name, category (`/cat:lsp`), or tag (`/tag:ui`).
 
 ## 🚫 Disabling plugins
 
@@ -287,6 +289,14 @@ require("pack").setup({
   }
 })
 ```
+
+## 🔒 Maintenance & Feature Policy
+
+`pack.nvim` is **feature-complete, fully tested, and production-ready**. 
+
+To preserve its zero-dependency model, ultra-fast startup, and rock-solid stability, **the codebase is under a strict feature freeze**:
+- **Bug fixes & Neovim compatibility updates** are actively maintained.
+- **New core features** will only be considered if requested and endorsed by **10 or more active users** via GitHub Issues/Discussions.
 
 ## 🙏 Acknowledgements
 

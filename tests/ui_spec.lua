@@ -426,4 +426,85 @@ describe("pack.ui", function()
       assert.is_false(state.get_plugins()["adopted.nvim"].disabled) -- unchanged
     end)
   end)
+
+  describe("inline load time display", function()
+    it("renders load time in parentheses next to the plugin name when set", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.get_plugins()["foo.nvim"].load_time = 13.5
+      state.update_status("foo.nvim", "loaded")
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("foo%.nvim%s+%(13%.5ms%)"))
+    end)
+
+    it("renders total load time in the Loaded section header", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.get_plugins()["foo.nvim"].load_time = 10.0
+      state.get_plugins()["bar.nvim"].load_time = 5.5
+      state.update_status("foo.nvim", "loaded")
+      state.update_status("bar.nvim", "loaded")
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("Loaded %(2%) %(15%.5ms%)"))
+    end)
+  end)
+
+  describe("visual profile bar chart", function()
+    it("renders relative ASCII bar chart in show_profile popup", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.get_plugins()["foo.nvim"].load_time = 15.0
+      state.get_plugins()["bar.nvim"].load_time = 5.0
+      ui.open(config)
+      ui.show_profile()
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("Pack Startup Profile"))
+      assert.is_truthy(text:match("%[%s*█+.*%]") ~= nil)
+    end)
+  end)
+
+  describe("category and tag filtering", function()
+    it("filters plugins by cat: category query", function()
+      local config = config_with({
+        { "user/foo.nvim", category = "lsp" },
+        { "user/bar.nvim", category = "git" },
+      })
+      state.init(config)
+      ui.open(config)
+      local orig_input = vim.ui.input
+      vim.ui.input = function(opts, cb) cb("cat:lsp") end
+      ui.filter()
+      vim.ui.input = orig_input
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("foo%.nvim"))
+      assert.is_falsy(text:match("bar%.nvim"))
+    end)
+  end)
+
+  describe("pending diff popup", function()
+    it("renders show_diff popup for outdated plugins", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 2)
+      state.set_outdated_detail("foo.nvim", {
+        revision_before = "111aaa",
+        revision_after = "222bbb",
+        upstream_branch = "main",
+        pending_commits = { "222bbb │ feat: new feature" },
+      })
+      ui.open(config)
+      require("pack.async").show_diff()
+      local popup_buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("Pack Pending Updates Diff"))
+      assert.is_truthy(text:match("foo%.nvim"))
+      assert.is_truthy(text:match("222bbb"))
+    end)
+  end)
 end)

@@ -402,16 +402,60 @@ function M.run_build_hook(plugin, done_cb)
     return done_cb()
   end
 
+  local status_before = plugin.status
+  state.update_status(plugin.name, "building")
+  ui_update()
+  if package.loaded["pack.ui"] then
+    require("pack.ui").ensure_spinner()
+  end
+
   local steps = type(build) == "table" and build or { build }
   local i = 0
   local function next_step()
     i = i + 1
     if i > #steps then
+      state.update_status(plugin.name, status_before or "installed")
+      ui_update()
       return done_cb()
     end
     run_build_step(plugin, steps[i], next_step)
   end
   next_step()
+end
+
+function M.show_diff()
+  local outdated = {}
+  for _, p in pairs(state.get_plugins()) do
+    if not p.disabled and p.behind and p.behind > 0 then
+      table.insert(outdated, p)
+    end
+  end
+  table.sort(outdated, function(a, b) return a.name < b.name end)
+
+  local lines = { "  Pack Pending Updates Diff", "  =========================", "" }
+  if #outdated == 0 then
+    table.insert(lines, "  No pending updates or outdated plugins found.")
+    table.insert(lines, "  (Press 'c' in :Pack to query upstream updates first)")
+  else
+    for _, p in ipairs(outdated) do
+      local branch_info = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""
+      table.insert(lines, string.format("  • %s — %d commit(s) behind%s", p.name, p.behind, branch_info))
+      if p.revision_before and p.revision_after then
+        table.insert(lines, string.format("    Revision: %s -> %s", p.revision_before, p.revision_after))
+      end
+      if p.pending_commits and #p.pending_commits > 0 then
+        for _, commit in ipairs(p.pending_commits) do
+          table.insert(lines, "    " .. commit)
+        end
+      end
+      table.insert(lines, "")
+    end
+  end
+
+  if package.loaded["pack.ui"] then
+    local buf = require("pack.ui").open_popup(lines, { height_pct = 0.6, width_pct = 0.7, close_keys = { "q", "d", "<Esc>" } })
+    vim.bo[buf].filetype = "pack_diff"
+  end
 end
 
 -- Register a PackChanged autocmd that runs build hooks after native installs or

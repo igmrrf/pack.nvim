@@ -361,6 +361,8 @@ function M.setup(opts)
     elseif subcmd == "profile" then
       ui.open(M.config)
       ui.show_profile()
+    elseif subcmd == "diff" then
+      require("pack.async").show_diff()
     else
       ui.open(M.config)
     end
@@ -372,7 +374,7 @@ function M.setup(opts)
       if CmdLine:sub(CursorPos, CursorPos):match("%s") then table.insert(args, "") end
 
       if #args <= 2 then
-        local subcommands = { "sync", "clean", "restore", "repair", "profile", "update", "build", "load", "delete" }
+        local subcommands = { "sync", "clean", "restore", "repair", "profile", "diff", "update", "build", "load", "delete" }
         local matches = {}
         for _, cmd in ipairs(subcommands) do
           if cmd:find("^" .. vim.pesc(ArgLead)) then

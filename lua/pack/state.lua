@@ -107,6 +107,9 @@ local function normalize(plugin, config)
 
   local build = plugin.build
 
+  local tags = plugin.tags
+  if type(tags) == "string" then tags = { tags } end
+
   return {
     url = full_url,
     name = name,
@@ -128,8 +131,10 @@ local function normalize(plugin, config)
     version = plugin.version,
     sem_version = plugin.sem_version,
     module = plugin.module,
+    category = plugin.category,
+    tags = tags or {},
     dir = "",
-    status = "unknown", -- missing, installed, loaded, error
+    status = "unknown", -- missing, installed, loaded, error, building
     log = {},
     disabled = false,
     behind = nil,

@@ -23,12 +23,14 @@ local spinner_timer = nil
 
 -- Is there any work worth animating? Deterministic busy checks OR a plugin
 -- mid-install/update. Self-correcting: statuses reset on completion.
+local open_popup = function(lines, opts) return M.open_popup(lines, opts) end
+
 local function work_in_progress()
   if package.loaded["pack.async"] and require("pack.async").is_busy() then
     return true
   end
   for _, p in pairs(state.get_plugins()) do
-    if p.status == "updating" or p.status == "installing" then
+    if p.status == "updating" or p.status == "installing" or p.status == "building" then
       return true
     end
   end
@@ -113,15 +115,16 @@ local KEYMAP_HELP = {
   { key = "Enter", scope = "all", desc = "toggle inline details for plugin" },
   { key = "K", scope = "all", desc = "full details (commit info) in popup" },
   { key = "l", scope = "all", desc = "view install/update logs" },
-  { key = "p", scope = "all", desc = "show startup profile (load times)" },
+  { key = "p", scope = "all", desc = "show startup profile (load times & bar chart)" },
+  { key = "d", scope = "all", desc = "view pending updates diff" },
   { key = "x", scope = "All, Disabled", desc = "toggle disable/enable" },
   { key = "c", scope = "all", desc = "check for outdated plugins" },
   { key = "u", scope = "Outdated", desc = "update plugin" },
   { key = "U", scope = "Outdated", desc = "update all outdated plugins" },
-  { key = "/", scope = "all", desc = "filter plugins" },
+  { key = "/", scope = "all", desc = "filter plugins (name, cat:category, tag:tag)" },
 }
 
-local function open_popup(lines, opts)
+function M.open_popup(lines, opts)
   opts = opts or {}
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -220,15 +223,38 @@ local function trigger_summary(p)
 end
 
 local function quick_detail_lines(p)
-  return {
-    "url:      " .. p.url,
-    "status:   " .. p.status,
+  local lines = {
+    "url:      " .. (p.url or "unknown"),
+    "status:   " .. (p.status or "unknown"),
     "managed:  " .. ((p.managed == false) and "no (native — lazy/config not controlled by pack.nvim)" or "yes"),
-    "dir:      " .. p.dir,
-    "lazy:     " .. tostring(p.lazy),
+    "dir:      " .. (p.dir or ""),
+    "lazy:     " .. tostring(p.lazy or false),
     "trigger:  " .. trigger_summary(p),
-    "disabled: " .. tostring(p.disabled),
+    "disabled: " .. tostring(p.disabled or false),
   }
+  if p.category then
+    table.insert(lines, "category: " .. p.category)
+  end
+  if p.tags and #p.tags > 0 then
+    table.insert(lines, "tags:     " .. table.concat(p.tags, ", "))
+  end
+  if p.priority then
+    table.insert(lines, "priority: " .. tostring(p.priority))
+  end
+  if p.load_time then
+    table.insert(lines, string.format("load time: %.2f ms", p.load_time))
+  end
+  if p.dependencies and #p.dependencies > 0 then
+    local deps = {}
+    for _, d in ipairs(p.dependencies) do
+      table.insert(deps, state.derive_name(d) or tostring(d))
+    end
+    table.insert(lines, "deps:     " .. table.concat(deps, ", "))
+  end
+  if p.build then
+    table.insert(lines, "build:    " .. vim.inspect(p.build))
+  end
+  return lines
 end
 
 function M.show_full_details()
@@ -240,11 +266,27 @@ function M.show_full_details()
     table.insert(lines, "  " .. dl)
   end
 
+  table.insert(lines, "")
+  table.insert(lines, "  Git & Working Tree Status")
+  table.insert(lines, "  -------------------------")
+
   local commit_line = "(no commit info available)"
-  if vim.fn.isdirectory(p.dir .. "/.git") == 1 then
-    local result = vim.fn.system({ "git", "-C", p.dir, "log", "-1", "--format=%h %s" })
+  if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+    local branch = vim.fn.system({ "git", "-C", p.dir, "rev-parse", "--abbrev-ref", "HEAD" })
+    if vim.v.shell_error == 0 and branch ~= "" then
+      table.insert(lines, "  branch:   " .. vim.trim(branch))
+    end
+
+    local result = vim.fn.system({ "git", "-C", p.dir, "log", "-1", "--format=%h %s (%cr) <%an>" })
     if vim.v.shell_error == 0 and result ~= "" then
       commit_line = vim.trim(result)
+    end
+
+    local status_out = vim.fn.system({ "git", "-C", p.dir, "status", "--porcelain" })
+    if vim.v.shell_error == 0 and vim.trim(status_out) ~= "" then
+      table.insert(lines, "  working:  has uncommitted local changes")
+    else
+      table.insert(lines, "  working:  clean")
     end
   end
   table.insert(lines, "  commit:   " .. commit_line)
@@ -255,13 +297,19 @@ function M.show_full_details()
     table.insert(lines, "  behind:   not checked")
   end
 
-  -- Surface a read-only probe failure (e.g. offline fetch) without it being
-  -- conflated with the plugin's load status.
   if p.outdated_error then
     table.insert(lines, "  check:    " .. tostring(p.outdated_error))
   end
 
-  open_popup(lines, { height_pct = 0.5 })
+  if p.pending_commits and #p.pending_commits > 0 then
+    table.insert(lines, "")
+    table.insert(lines, "  Pending Commits (Upstream):")
+    for _, commit in ipairs(p.pending_commits) do
+      table.insert(lines, "    • " .. commit)
+    end
+  end
+
+  open_popup(lines, { height_pct = 0.65, width_pct = 0.7 })
 end
 
 function M.toggle_disabled()
@@ -372,6 +420,7 @@ function M.open(config)
   vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
   vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
   vim.keymap.set("n", "p", "<Cmd>lua require('pack.ui').show_profile()<CR>", opts)
+  vim.keymap.set("n", "d", "<Cmd>lua require('pack.async').show_diff()<CR>", opts)
   vim.keymap.set("n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
   vim.keymap.set("n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
   vim.keymap.set("n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
@@ -388,27 +437,31 @@ end
 
 function M.show_profile()
   local profiles = {}
+  local total = 0
   for _, p in pairs(state.get_plugins()) do
     if p.load_time then
       table.insert(profiles, p)
+      total = total + p.load_time
     end
   end
   table.sort(profiles, function(a, b) return a.load_time > b.load_time end)
 
   local lines = { "  Pack Startup Profile", "  ====================", "" }
-  local total = 0
+  local bar_max = 16
   for _, p in ipairs(profiles) do
-    total = total + p.load_time
-    table.insert(lines, string.format("  %8.2f ms  %s", p.load_time, p.name))
+    local pct = total > 0 and (p.load_time / total) * 100 or 0
+    local filled = total > 0 and math.max(1, math.floor((p.load_time / total) * bar_max)) or 0
+    local bar = "[" .. string.rep("█", filled) .. string.rep("░", bar_max - filled) .. "]"
+    table.insert(lines, string.format("  %s %3d%%  (%6.2f ms)  %s", bar, math.floor(pct + 0.5), p.load_time, p.name))
   end
   if #profiles == 0 then
     table.insert(lines, "  No profiles recorded.")
   else
     table.insert(lines, "")
-    table.insert(lines, string.format("  %8.2f ms  (total, %d plugins)", total, #profiles))
+    table.insert(lines, string.format("  Total: %8.2f ms  (%d loaded plugins)", total, #profiles))
   end
 
-  local buf = open_popup(lines, { close_keys = { "q", "p", "<Esc>" } })
+  local buf = open_popup(lines, { close_keys = { "q", "p", "<Esc>" }, width_pct = 0.7 })
   vim.bo[buf].filetype = "pack_profile"
 end
 
@@ -436,13 +489,41 @@ local function add_plugin_details(p, lines, highlights, indent)
   end
 end
 
+local function matches_search(p, term)
+  if not term or term == "" then return true end
+  local query = term:lower()
+
+  local cat_query = query:match("^cat%s*:%s*(.*)") or query:match("^category%s*:%s*(.*)")
+  if cat_query then
+    return p.category and p.category:lower():find(cat_query, 1, true) ~= nil
+  end
+
+  local tag_query = query:match("^tag%s*:%s*(.*)") or query:match("^tags%s*:%s*(.*)")
+  if tag_query then
+    if not p.tags then return false end
+    for _, t in ipairs(p.tags) do
+      if t:lower():find(tag_query, 1, true) then return true end
+    end
+    return false
+  end
+
+  if p.name:lower():find(query, 1, true) then return true end
+  if p.category and p.category:lower():find(query, 1, true) then return true end
+  if p.tags then
+    for _, t in ipairs(p.tags) do
+      if t:lower():find(query, 1, true) then return true end
+    end
+  end
+  return false
+end
+
 local function render_all_tab(lines, highlights)
   local plugins = state.get_plugins()
-  local groups = { loaded = {}, installed = {}, missing = {}, installing = {}, updating = {}, error = {} }
+  local groups = { loaded = {}, installed = {}, missing = {}, installing = {}, updating = {}, building = {}, error = {} }
 
   for _, p in pairs(plugins) do
     if not p.disabled then
-      if search_term == "" or p.name:lower():find(search_term, 1, true) then
+      if matches_search(p, search_term) then
         if groups[p.status] then table.insert(groups[p.status], p)
         else table.insert(groups.installed, p) end
       end
@@ -453,12 +534,36 @@ local function render_all_tab(lines, highlights)
 
   local function render_group(name, list, icon, hl_group)
     if #list > 0 then
-      table.insert(lines, "  " .. name .. " (" .. #list .. ")")
+      local total_time_str = ""
+      if name == "Loaded" then
+        local total_time = 0
+        for _, p in ipairs(list) do
+          if p.load_time then
+            total_time = total_time + p.load_time
+          end
+        end
+        if total_time > 0 then
+          if total_time < 1 then
+            total_time_str = string.format(" (%.2fms)", total_time)
+          else
+            total_time_str = string.format(" (%.1fms)", total_time)
+          end
+        end
+      end
+      table.insert(lines, string.format("  %s (%d)%s", name, #list, total_time_str))
       table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
       for _, p in ipairs(list) do
         local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
+        local time_str = ""
+        if p.load_time then
+          if p.load_time < 1 then
+            time_str = string.format(" (%.2fms)", p.load_time)
+          else
+            time_str = string.format(" (%.1fms)", p.load_time)
+          end
+        end
         local tag = (p.managed == false) and "  (native)" or ""
-        local line = string.format("    %s %s %s%s", expand_icon, icon, p.name, tag)
+        local line = string.format("    %s %s %s%s%s", expand_icon, icon, p.name, time_str, tag)
         table.insert(lines, line)
         plugin_map[#lines] = p
 
@@ -466,8 +571,14 @@ local function render_all_tab(lines, highlights)
         local icon_start = 8
         local icon_end = 8 + #icon
         table.insert(highlights, { line = #lines - 1, col_start = icon_start, col_end = icon_end, hl = hl_group })
+        
+        local name_end = 8 + #icon + 1 + #p.name
+        if time_str ~= "" then
+          table.insert(highlights, { line = #lines - 1, col_start = name_end, col_end = name_end + #time_str, hl = "Comment" })
+        end
         if p.managed == false then
-          table.insert(highlights, { line = #lines - 1, col_start = #line - #"  (native)", col_end = -1, hl = "Comment" })
+          local tag_start = name_end + #time_str
+          table.insert(highlights, { line = #lines - 1, col_start = tag_start, col_end = tag_start + #tag, hl = "Comment" })
         end
 
         add_plugin_details(p, lines, highlights, "      ")
@@ -479,6 +590,7 @@ local function render_all_tab(lines, highlights)
   render_group("Missing", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticError")
   render_group("Installing", groups.installing, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Updating", groups.updating, config_ref.ui.icons.sync, "DiagnosticWarn")
+  render_group("Building", groups.building, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Loaded", groups.loaded, config_ref.ui.icons.loaded, "DiagnosticOk")
   render_group("Installed (Not Loaded)", groups.installed, config_ref.ui.icons.loaded, "DiagnosticInfo")
   render_group("Errors", groups.error, config_ref.ui.icons.error, "DiagnosticError")
@@ -488,7 +600,7 @@ local function render_outdated_tab(lines, highlights)
   local outdated = {}
   for _, p in pairs(state.get_plugins()) do
     if not p.disabled and p.behind and p.behind > 0 then
-      if search_term == "" or p.name:lower():find(search_term, 1, true) then
+      if matches_search(p, search_term) then
         table.insert(outdated, p)
       end
     end
@@ -544,7 +656,7 @@ local function render_disabled_tab(lines, highlights)
   local disabled = {}
   for _, p in pairs(state.get_plugins()) do
     if p.disabled then
-      if search_term == "" or p.name:lower():find(search_term, 1, true) then
+      if matches_search(p, search_term) then
         table.insert(disabled, p)
       end
     end
