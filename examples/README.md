@@ -16,3 +16,6 @@ This directory contains full configuration examples demonstrating different ways
 - [06_native_vim_pack_bootstrap.lua](./06_native_vim_pack_bootstrap.lua): Explains how to leverage Neovim's built-in `vim.pack.add` to natively fetch and install `pack.nvim` itself.
 - [07_all_features_spec.lua](./07_all_features_spec.lua): An exhaustive reference file demonstrating every possible configuration option and feature you can define in a plugin spec.
 - [08_modular_configuration.lua](./08_modular_configuration.lua): Shows how to use `{ import = "plugins" }` to automatically load plugin specs by just returning tables from your files.
+- [09_migration_from_lazy.lua](./09_migration_from_lazy.lua): A migration guide for users coming from `lazy.nvim`.
+- [10_migration_from_packer.lua](./10_migration_from_packer.lua): A migration guide for users coming from `packer.nvim`.
+- [11_migration_imperative.lua](./11_migration_imperative.lua): A migration guide for users transitioning from imperative `vim.pack.add` scripts to declarative `{ import = "plugins" }` specs.

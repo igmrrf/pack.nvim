@@ -1,0 +1,49 @@
+-- ============================================================================
+-- MIGRATION GUIDE: Imperative vim.pack.add -> pack.nvim { import = "plugins" }
+-- ============================================================================
+-- Neovim 0.12+ introduces native `vim.pack.add`. You might be used to calling
+-- this imperatively across multiple files. However, to leverage lazy-loading,
+-- custom keys, and UI features, pack.nvim needs to process all specs at once
+-- before plugins are actually loaded.
+--
+-- Key Differences:
+-- 1. Don't call `vim.pack.add(...)` and `vim.cmd.packadd(...)` directly inside
+--    your modular files.
+-- 2. Instead, simply return a table (the spec) from your file.
+-- 3. Use `{ import = "your_folder" }` in your main setup to auto-load them.
+--
+-- Example Conversion:
+
+-- ==========================================
+-- BEFORE: lua/plugins/myplugin.lua
+-- ==========================================
+-- vim.pack.add({
+--   { src = "https://github.com/nvim-lua/plenary.nvim" },
+--   { src = "https://github.com/nvim-telescope/telescope.nvim", name = "telescope" }
+-- })
+-- 
+-- -- Synchronous forced loads
+-- vim.cmd.packadd("plenary.nvim")
+-- vim.cmd.packadd("telescope")
+-- 
+-- require("telescope").setup({})
+
+-- ==========================================
+-- AFTER: lua/plugins/myplugin.lua
+-- ==========================================
+-- Just return the table! pack.nvim handles the downloading, load ordering,
+-- and asynchronous loading automatically.
+--
+-- return {
+--   "nvim-lua/plenary.nvim",
+--   {
+--     "nvim-telescope/telescope.nvim",
+--     -- config runs automatically after the plugin is loaded
+--     config = function()
+--       require("telescope").setup({})
+--     end
+--   }
+-- }
+
+-- And in your init.lua:
+-- require("pack").setup({ plugins = { { import = "plugins" } } })

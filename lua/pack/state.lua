@@ -166,7 +166,15 @@ function M.add_plugin(p, config)
     return {}
   end
   
-  if M.plugins[normalized.name] then
+  local existing = M.plugins[normalized.name]
+  if existing then
+    if not existing.managed then
+      -- Upgrade adopted stub to a fully managed plugin
+      for k, v in pairs(normalized) do
+        existing[k] = v
+      end
+      return { existing }
+    end
     return {}
   end
   
