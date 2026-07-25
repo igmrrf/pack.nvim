@@ -14,9 +14,10 @@
 - Install location + lockfile owned by native vim.pack — not configurable.
 - Managed wins on name collision: never overwrite a managed record with an adopted one.
 - Local (`dir=`) plugins never reach native and are never adopted.
-- Run a single test file with:
-  `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/<file>.lua"`
-- Full suite: `make test`.
+- Run a single test file with (Directory form + explicit minimal_init so the child
+  loads the repo copy, not any installed pack.nvim on the machine):
+  `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/<file>.lua { minimal_init = 'tests/minimal_init.lua' }"`
+- Full suite (canonical gate): `make test`.
 
 ---
 
@@ -104,7 +105,7 @@ Add to `tests/state_spec.lua` before the final `end)` (line 125):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/state_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/state_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: FAIL — `managed` is nil, `adopted.nvim` is nil after reconcile.
 
 - [ ] **Step 3: Add `managed = true` to the normalized record**
@@ -167,7 +168,7 @@ In `lua/pack/state.lua`, replace the `for _, entry in ipairs(list) do ... end` l
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/state_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/state_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: PASS (all state specs, including the four new ones).
 
 - [ ] **Step 6: Commit**
@@ -221,7 +222,7 @@ Add to `tests/delegate_spec.lua` (inside its top-level `describe`, before the cl
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/delegate_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/delegate_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: FAIL — `adopted.nvim` is nil (reconcile not called in setup) and/or wrapper timing.
 
 - [ ] **Step 3: Reorder `setup()` — finalize config and extract plugins before loading**
@@ -301,7 +302,7 @@ Then DELETE the now-duplicated wrapper block that previously sat at lines 218-24
 
 - [ ] **Step 6: Run the test to verify it passes**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/delegate_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/delegate_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: PASS.
 
 - [ ] **Step 7: Run the full suite to catch ordering regressions**
@@ -380,7 +381,7 @@ Add to `tests/ui_spec.lua` inside the top-level `describe("pack.ui", ...)`, befo
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/ui_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ui_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: FAIL — no `(native)` tag; `toggle_disabled` flips the flag.
 
 - [ ] **Step 3: Append the `(native)` tag in render_group**
@@ -439,7 +440,7 @@ In `lua/pack/ui.lua`, `M.toggle_disabled` (line 266) begins by resolving the plu
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/ui_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ui_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: PASS.
 
 - [ ] **Step 7: Run the full suite**
@@ -496,7 +497,7 @@ Add a test that drives `pack.setup` with a fake native_pack recording added spec
 
 - [ ] **Step 2: Run it to verify it fails, then passes**
 
-Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedFile tests/loadflow_spec.lua"`
+Run: `nvim --headless --noplugin -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/loadflow_spec.lua { minimal_init = 'tests/minimal_init.lua' }"`
 Expected: FAIL before Tasks 1-2 land; PASS after. (If placing in a new file, run that file.)
 
 - [ ] **Step 3: Run full suite**
