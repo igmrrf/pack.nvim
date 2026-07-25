@@ -384,4 +384,46 @@ describe("pack.ui", function()
       assert.same({ "foo.nvim" }, updated)
     end)
   end)
+
+  describe("adopted (native) plugins", function()
+    local function seed_adopted()
+      state.get_plugins()["adopted.nvim"] = {
+        name = "adopted.nvim", url = "https://github.com/x/adopted.nvim",
+        dir = "/x/adopted.nvim", status = "loaded", managed = false,
+        disabled = false, lazy = false, priority = 50, log = {}, dependencies = {}, is_local = false,
+      }
+    end
+
+    it("tags adopted plugins with (native) in the all tab", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      seed_adopted()
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_truthy(text:match("adopted%.nvim%s+%(native%)"))
+      assert.is_falsy(text:match("foo%.nvim%s+%(native%)")) -- managed plugin has no tag
+    end)
+
+    it("toggle_disabled refuses an adopted plugin", function()
+      local config = config_with({})
+      state.init(config)
+      seed_adopted()
+      state.get_plugins()["adopted.nvim"].disabled = false
+      -- point the cursor resolver at the adopted plugin, then invoke.
+      -- (Set cursor to its line via ui.open + search, or call the handler with it
+      --  already expanded — use the same cursor-positioning the other detail tests use.)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      for i, l in ipairs(lines) do
+        if l:find("adopted.nvim", 1, true) then
+          vim.api.nvim_win_set_cursor(0, { i, 0 })
+          break
+        end
+      end
+      ui.toggle_disabled()
+      assert.is_false(state.get_plugins()["adopted.nvim"].disabled) -- unchanged
+    end)
+  end)
 end)
