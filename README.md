@@ -290,6 +290,25 @@ require("pack").setup({
 })
 ```
 
+## 📊 Comparison Matrix
+
+| Feature / Dimension | `pack.nvim` | `lazy.nvim` | `pckr.nvim` | `paq-nvim` | `vim-plug` |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Minimum Neovim** | **0.12+** (Requires `vim.pack`) | 0.8+ | 0.7+ | 0.5+ | Vim 7.4 / Neovim 0.2+ |
+| **Backend Engine** | Native C (`vim.pack`) | Custom Lua engine | Native `packpath` | Native `packpath` | Custom Vimscript engine |
+| **Storage Location** | `<stdpath("data")>/site/pack/core/opt` | `<stdpath("data")>/lazy` | `<stdpath("data")>/site/pack/pckr/opt` | `<stdpath("data")>/site/pack/paq/opt` | `~/.config/nvim/plugged` |
+| **Lockfile Format** | Native `nvim-pack-lock.json` | Custom `lazy-lock.json` | Custom lockfile | None | None (snapshots) |
+| **Codebase Size** | **~2,000 lines of Lua** | ~20,000+ lines of Lua | ~3,500 lines of Lua | ~600 lines of Lua | ~2,700 lines of Vimscript |
+| **Lazy Loading Triggers** | `cmd`, `event`, `ft`, `keys`, `cond` | `cmd`, `event`, `ft`, `keys`, `cond`, custom | `cmd`, `event`, `ft`, `keys`, `cond` | None (Eager / `packadd` only) | `on` (cmd), `for` (ft) |
+| **Dependency Support** | Yes (`dependencies`) | Yes (`dependencies`) | Yes (`requires`) | No | No (manual order) |
+| **Modular Specs** | Yes (`{ import = "..." }`) | Yes (`{ import = "..." }`) | No | No | No |
+| **Precompiled `ftdetect` Cache** | Yes (`pack_ftdetect_cache.lua`) | Yes | No | No | No |
+| **Interactive Dashboard** | Floating UI with tabs, `/` search, commit diffs | Full-featured floating UI dashboard | Minimal floating log buffer | Minimal log buffer | Vim split buffer |
+| **Startup Profiling** | Built-in (`:Pack profile` ASCII charts) | Built-in (Timeline breakdown) | Built-in (`:Pckr profile`) | None | Built-in (`:PlugStatus`) |
+| **Build Hooks** | `build` (shell, `:cmd`, fn, list) | `build` (shell, `:cmd`, fn, list) | `run` (shell, fn, list) | `build` (shell, fn) | `do` (shell, fn) |
+| **Native Plugin Adoption** | Yes (adopts disk plugins via `vim.pack.get`) | No (requires managed dir) | Partial | Partial | No |
+| **Maintenance Model** | **Feature-frozen** (stable & bug fixes) | Active development | Maintenance | Minimal / Stable | Maintenance |
+
 ## 🔒 Maintenance & Feature Policy
 
 `pack.nvim` is **feature-complete, fully tested, and production-ready**. 
@@ -301,3 +320,4 @@ To preserve its zero-dependency model, ultra-fast startup, and rock-solid stabil
 ## 🙏 Acknowledgements
 
 Several declarative spec and lazy-loading features (such as `import`, programmatic conditionals, advanced event pattern matching, and context-aware hook variables) were heavily inspired by [zpack.nvim](https://github.com/zuqini/zpack.nvim) and its foundational homage to `lazy.nvim`. pack.nvim combines these elegant spec configurations with a rich asynchronous floating dashboard on top of Neovim's native `vim.pack` backend.
+
