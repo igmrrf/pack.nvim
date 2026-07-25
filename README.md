@@ -2,6 +2,8 @@
 
 A modern, high-performance Neovim plugin manager that leverages Neovim's built-in native package management (`:help packages`, `vim.pack`) while providing a rich, interactive, floating-window UI.
 
+![pack.nvim Dashboard](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/All.jpg)
+
 Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nvim** focuses on developer experience with a beautiful dashboard, non-blocking asynchronous git operations, and real-time log streaming.
 
 ## ✅ Requirements
@@ -239,6 +241,14 @@ require("pack").map_keys({
 | `:Pack diff` | Displays a structured diff of pending commits for outdated plugins before updating. |
 
 Subcommands with a `<name>` argument tab-complete against your configured plugins.
+
+### 📸 UI Showcase
+
+| Dashboard View | Plugin Quick Details |
+| :---: | :---: |
+| **All Plugins**<br>![All Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/All.jpg) | **Detailed Info Popup (`<Enter>` / `K`)**<br>![Plugin Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/All_info.jpg) |
+| **Outdated Updates View**<br>![Outdated Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated.jpg) | **Outdated Plugin Info & Diff**<br>![Outdated Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated_info.png) |
+| **Disabled Plugins View**<br>![Disabled Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled.png) | **Disabled Plugin Info**<br>![Disabled Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled_info.png) |
 
 ## ⌨️ Dashboard Keymaps
 
