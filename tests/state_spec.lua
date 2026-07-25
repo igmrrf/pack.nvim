@@ -181,4 +181,13 @@ describe("pack.state", function()
     end })
     assert.equals(gen0 + 1, state.generation) -- one adopted
   end)
+
+  it("init resets previously registered plugins", function()
+    state.init(config_with({ "user/foo.nvim", commit = "abc" }))
+    -- re-init with a different plugin set must NOT retain the old ones
+    state.init(config_with({ "user/bar.nvim" }))
+    local plugins = state.get_plugins()
+    assert.is_nil(plugins["foo.nvim"], "stale plugin from prior init must be cleared")
+    assert.is_not_nil(plugins["bar.nvim"])
+  end)
 end)
