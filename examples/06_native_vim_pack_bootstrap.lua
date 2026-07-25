@@ -2,8 +2,8 @@
 -- This delegates the initial cloning and installation entirely to Neovim.
 
 -- 1. Tell Neovim to download and add pack.nvim to the package path.
--- By default, vim.pack.add installs into `~/.local/share/nvim/site/pack/core/opt/<plugin>`
-vim.pack.add({ "https://github.com/igmrrf/pack.nvim" })
+-- By default, vim.pack.add installs into `<stdpath("data")>/site/pack/core/opt/<plugin>`
+vim.pack.add({ { src = "https://github.com/igmrrf/pack.nvim", branch = "main" } })
 
 -- 2. Since vim.pack.add places the plugin in `opt/`, we must manually load it
 vim.cmd("packadd pack.nvim")

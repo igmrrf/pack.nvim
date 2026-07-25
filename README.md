@@ -17,7 +17,7 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nv
 * **Native Git, Async Probes:** Clone / checkout / update / pinning are handled by native `vim.pack`. pack.nvim layers on non-blocking, **concurrency-limited** read-only git probes (via `vim.system`) purely to power the dashboard's "outdated" indicator and commit preview.
 * **Interactive UI Dashboard:** A centralized floating window showing real-time plugin statuses, log streaming, and pending-commit previews for outdated plugins.
 * **Reproducible installs:** Version pinning (`branch` / `tag` / `commit` / semver `version` ranges) is resolved to a native `vim.pack` spec; native owns the lockfile, and `:Pack restore` rolls every plugin back to it.
-* **Persistent Disable State:** Disabling a plugin is persisted (see [Disabling plugins](#-disabling-plugins)) without editing your raw Lua config.
+* **Persistent Disable State:** Disabling a plugin (via `x` in the dashboard or `set_disabled()`) persists state to `nvim-pack-extra.json` without editing your raw Lua config.
 * **Performance Caching:** Pre-compiles lazy plugins' `ftdetect` files into a single cache block, sourced at startup so their filetypes are detected before the plugin loads.
 * **Lazy Loading:** Supports `cmd`, `event` (with patterns), `ft` (filetype), and `keys` (keymap) triggers to load plugins right when you need them.
 * **Modular Configuration:** Keep your config clean by using `{ import = "plugins" }` to split specs across multiple files.
@@ -25,159 +25,42 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nv
 * **Help Tags:** `:help` tags are generated automatically for every managed plugin's `doc/` directory on load.
 * **Health Check:** Run `:checkhealth pack` to verify your Neovim version, `git`, the install directory, per-plugin status, and orphaned directories.
 
-## 🚀 Advanced Features
-
-### Dependency Management
-Define dependencies that will be automatically installed and loaded before your main plugin.
-```lua
-{
-  "nvim-telescope/telescope.nvim",
-  dependencies = { "nvim-lua/plenary.nvim" }
-}
-```
-
-### Post-Install & Build Hooks
-Run custom build steps after a plugin is installed or updated. `build` accepts the
-same forms as lazy.nvim — a shell string, a `:Command` string, a Lua function, or a
-list of any of those run in sequence:
-```lua
-{
-  "nvim-telescope/telescope-fzf-native.nvim",
-  build = "make",                       -- shell command
-}
-{
-  "nvim-treesitter/nvim-treesitter",
-  build = ":TSUpdate",                  -- Vim ex-command (leading ':')
-}
-{
-  "saghen/blink.cmp",
-  build = function(plugin) end,         -- Lua function, gets the plugin context
-}
-{
-  "some/plugin",
-  build = { ":Cmd", "make", function() end },  -- list, run in order
-}
-```
-> Build strings run through the shell (`sh -c`, or `cmd /c` on Windows) — treat them as trusted config only, never a value pulled from a remote source.
-
-### Context-Aware Initialization
-Hooks like `config`, `init`, `cond`, and `build` pass a rich `Plugin` object containing its filesystem `.path` and `.spec`, allowing dynamic configurations.
-```lua
-{
-  "nvim-lualine/lualine.nvim",
-  init = function(plugin)
-    -- Guaranteed to run before the plugin loads
-    vim.g.lualine_plugin_dir = plugin.path
-  end,
-  config = function(plugin, opts)
-    -- Runs after load
-    require("lualine").setup(opts)
-  end
-}
-```
-
-### Conditional Loading & Priorities
-Easily sort eager plugins or ignore them entirely.
-```lua
-{
-  "folke/tokyonight.nvim",
-  priority = 1000, -- Ensure colorscheme loads before everything else
-  cond = not vim.g.vscode, -- Skip loading if running inside VSCode
-}
-```
-
-### Local Plugin Support
-Develop plugins locally without needing a remote repository.
-```lua
-{
-  "my-local-plugin",
-  dir = "~/projects/my-local-plugin"
-}
-```
-
-### Startup Profiling
-Debug slow startup times by viewing precisely how long each plugin took to load during initialization using the `:Pack profile` command (or `p` inside the dashboard).
-
-### Commit Previews
-When a plugin is behind its upstream, the dashboard shows the pending commits (`git log HEAD..origin/<branch>`) and the before/after revisions, so you can see exactly what an update will pull in.
-
-### Dashboard Filtering
-Search a large plugin list by typing `/` to filter the dashboard by name in real-time.
-
 ## 🚀 Installation & Bootstrapping
 
-pack.nvim is designed to manage itself. Add this bootstrap snippet to the very top of your `init.lua`:
+pack.nvim leverages Neovim 0.12's native `vim.pack` for bootstrapping. Add this snippet to the top of your `init.lua`:
 
 ```lua
-local pack_path = vim.fn.stdpath("data") .. "/site/pack/core/opt/pack.nvim"
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
 
--- Automatically clone pack.nvim if it's not installed
-if not vim.uv.fs_stat(pack_path) then
-  vim.fn.system({
-    "git",
-    "clone",
-    "--filter=blob:none",
-    "https://github.com/igmrrf/pack.nvim.git",
-    "--branch=main",
-    pack_path,
-  })
-end
+-- 1. Bootstrap pack.nvim using Neovim's native vim.pack
+vim.pack.add({ { src = "https://github.com/igmrrf/pack.nvim", branch = "main" } })
+vim.cmd.packadd("pack.nvim")
 
--- Add to runtime path unconditionally
-vim.opt.rtp:prepend(pack_path)
-
--- Initialize pack.nvim
+-- 2. Initialize pack.nvim with options and plugin specs
 require("pack").setup({
+  performance = {
+    vim_loader = true, -- Enables Neovim's built-in bytecode cache (vim.loader.enable())
+  },
+  ui = {
+    border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
+    icons = {
+      loaded = "●",
+      not_loaded = "○",
+      error = "✖",
+      sync = "↺",
+    },
+  },
   plugins = {
-    -- Let pack.nvim manage itself!
-    { "igmrrf/pack.nvim" },
-
-    -- Example: Auto-loaded dependency
-    { "nvim-lua/plenary.nvim" },
-
-    -- Example: opts shorthand - calls require("telescope").setup(opts) for you,
-    -- no need to write your own `config` function
-    { 
-      "nvim-telescope/telescope.nvim", 
-      lazy = true, 
-      cmd = "Telescope",
-      opts = {
-        defaults = { layout_strategy = "vertical" },
-      },
-    },
-
-    -- Example: `main` overrides the inferred module name when it doesn't match
-    -- the "<module>.nvim" convention (default: strip a trailing ".nvim")
-    {
-      "igmrrf/arduino_nvim",
-      main = "arduino-nvim",
-      opts = { mode = "float" },
-    },
-
-    -- Example: Lazy-loaded via Filetype
-    { 
-      "nvim-treesitter/nvim-treesitter", 
-      lazy = true, 
-      ft = { "lua", "python", "javascript" } 
-    },
-
-    -- Example: Lazy-loaded via Event
-    { 
-      "catppuccin/nvim", 
-      as = "catppuccin",
-      lazy = true,
-      event = "VimEnter"
-    },
-
-    -- Example: Lazy-loaded via Keymap (loads on first press, then replays the key)
-    {
-      "folke/flash.nvim",
-      lazy = true,
-      keys = { "s", { "S", mode = { "n", "x", "o" } } },
-    }
-  }
+    { "igmrrf/pack.nvim" }, -- So pack.nvim can manage itself (updates, status, lockfile)
+    { import = "plugins" },  -- Import specs from lua/plugins/* (files can call vim.pack.add or return a spec table)
+  },
 })
+
+require("configs")
 ```
+
+For alternative installation patterns (e.g. `vim.uv.fs_stat` fallback, raw git cloning), see the [examples/](examples/) directory.
 
 ### Adopting existing `vim.pack` plugins
 
@@ -214,16 +97,66 @@ loader. The install location and lockfile are owned by native `vim.pack` and are
     later spec's fields (`lazy`/`config`/`keys`/`opts`) are silently ignored; declare each plugin
     once, in one style.
 
-### Bulk keymaps
+## 📋 Plugin Specification
 
-`require("pack").map_keys({ ... })` registers a list of keymaps in one call — handy inside a plugin's `config` function:
+Plugin specifications can be defined as shorthand strings (`"owner/repo"`), tables, or URLs. Here is a comprehensive reference of supported spec keys:
 
-```lua
-require("pack").map_keys({
-  { "<leader>e", "<cmd>Oil<cr>", desc = "Open Oil" },
-  { "<leader>gg", function() require("snacks").lazygit() end, desc = "Lazygit", mode = { "n", "v" } },
-})
-```
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `[1]` / `src` | `string` | Plugin repository (`"owner/repo"`), full Git URL, or local path. |
+| `as` / `name` | `string` | Custom name or directory alias for the plugin. |
+| `dir` | `string` | Path to a local development plugin (bypasses git cloning). |
+| `lazy` | `boolean` | When `true`, defers loading until triggered by `cmd`, `event`, `ft`, `keys`, or `require()`. |
+| `priority` | `number` | Load order priority for eager plugins (higher values load first, default `50`). |
+| `enabled` | `boolean\|fun():boolean` | Toggle to enable or completely skip this plugin spec. |
+| `cond` | `boolean\|fun(plugin):boolean` | Conditional expression or callback function to gate plugin loading. |
+| `main` | `string` | Overrides the target module name passed to `opts` auto-setup. |
+| `cmd` | `string\|table` | User command(s) that trigger lazy loading. |
+| `ft` | `string\|table` | Filetype(s) that trigger lazy loading. |
+| `event` | `string\|table` | Autocmd event(s) or pattern(s) that trigger lazy loading (e.g. `"BufReadPre"`). |
+| `keys` | `string\|table` | Keymap shortcut(s) that trigger lazy loading or register keybindings. |
+| `dependencies` | `table` | List of dependent plugin specs loaded prior to this plugin. |
+| `init` | `fun(plugin)` | Callback executed BEFORE the plugin is loaded (useful for setting `vim.g` options). |
+| `opts` | `table` | Options table automatically passed to `require(main).setup(opts)`. |
+| `config` | `fun(plugin, opts)` | Custom callback executed AFTER the plugin is loaded (overrides default `opts` behavior). |
+| `build` | `string\|fun(plugin)` | Shell command or Lua function executed post-install / update. |
+| `branch` | `string` | Track a specific git branch. |
+| `tag` | `string` | Pin to a specific git tag. |
+| `commit` | `string` | Pin to a specific git commit hash. |
+| `version` | `string` | Pin to a semver version range (e.g. `"^1.0.0"`). |
+| `category` | `string` | Category metadata tag for filtering in the dashboard (`/cat:lsp`). |
+| `tags` | `string\|table` | Custom tag string or table of tags for dashboard filtering (`/tag:ui`). |
+
+## 🔌 Lua API
+
+pack.nvim exposes programmatic Lua helper functions for configuration and key mapping:
+
+* **`require("pack").setup(opts)`**: Initializes pack.nvim with user configuration and plugin specs.
+* **`require("pack").add(specs)`**: Programmatically registers and installs new plugin specs post-startup.
+* **`require("pack").map_keys(keys)`**: Registers a list of keymaps in a single call:
+  ```lua
+  require("pack").map_keys({
+    { "<leader>e", "<cmd>Oil<cr>", desc = "Open Oil" },
+    { "<leader>gg", function() require("snacks").lazygit() end, desc = "Lazygit", mode = { "n", "v" } },
+  })
+  ```
+* **`require("pack.state").set_disabled(name, disabled)`**: Programmatically enables or disables a plugin and persists state to `nvim-pack-extra.json`.
+
+
+## ⚡ Advanced Capabilities & Examples
+
+For full configuration examples and migration guides, see the [examples/](examples/) directory:
+
+- **[Basic Bootstrap](examples/01_basic_bootstrap.lua):** Standard `vim.uv.fs_stat` + `git clone` bootstrapping snippet.
+- **[Native vim.pack Bootstrap](examples/06_native_vim_pack_bootstrap.lua):** Minimal 0.12+ native `vim.pack.add` bootstrapping.
+- **[Dependency Management](examples/03_advanced_hooks.lua):** Automatically clone and load dependencies (`dependencies = { ... }`).
+- **[Post-Install & Build Hooks](examples/03_advanced_hooks.lua):** Execute shell commands, Vim commands, or Lua functions post-update (`build = ...`).
+- **[Context-Aware Initialization](examples/03_advanced_hooks.lua):** Use `init`, `config`, `cond`, and `build` with rich `Plugin` object context.
+- **[Lazy Loading Triggers](examples/02_lazy_loading.lua):** Defer plugins by `cmd`, `event`, `ft`, `keys`, or `cond`.
+- **[Modular Configs](examples/08_modular_configuration.lua):** Split plugin specs cleanly using `{ import = "plugins" }`.
+- **[Full Spec Reference](examples/07_all_features_spec.lua):** View an exhaustive example spec showing all available options.
+- **[Migration Guides](examples/):** Guides for migrating from [lazy.nvim](examples/09_migration_from_lazy.lua), [packer.nvim](examples/10_migration_from_packer.lua), or [imperative vim.pack](examples/11_migration_imperative.lua).
+
 
 ## 💻 Commands
 
@@ -234,6 +167,7 @@ require("pack").map_keys({
 | `:Pack update [name]` | Updates a single plugin (or all plugins if no name is given). |
 | `:Pack clean` | Removes plugin directories no longer referenced in your configuration. |
 | `:Pack restore` | Rolls every plugin back to the native `vim.pack` lockfile. |
+| `:Pack repair` | Realigns lockfile (`nvim-pack-lock.json`) revisions to installed plugin HEAD commits. |
 | `:Pack build [name]` | Re-runs the `build` hook for one plugin (or all plugins). |
 | `:Pack load <name>` | Immediately loads a lazy plugin. |
 | `:Pack delete <name>` | Removes a plugin from state and deletes it via native `vim.pack`. |
@@ -263,42 +197,11 @@ When inside the dashboard (opened via `:Pack`), you can use the following keymap
 *   `l` - Show git output logs for the plugin under the cursor.
 *   `p` - Show the startup profile with visual bar chart.
 *   `d` - View pending updates diff for outdated plugins.
-*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs); see [Disabling plugins](#-disabling-plugins). An already-loaded plugin needs a restart to fully unload.
+*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). An already-loaded plugin needs a restart to fully unload.
 *   `c` - Check for outdated plugins (concurrency-limited `git fetch`, skipping any checked within the last few minutes).
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
 *   `/` - Filter the dashboard by plugin name, category (`/cat:lsp`), or tag (`/tag:ui`).
-
-## 🚫 Disabling plugins
-
-Pressing `x` on a plugin (or calling `require("pack.state").set_disabled(name, true)`) persists the
-disabled set to `nvim-pack-extra.json` in your Neovim **config** directory. The file is a nested JSON
-object, so prefer toggling via the dashboard rather than hand-editing:
-
-```json
-{ "plugins": { "foo.nvim": { "disabled": true } } }
-```
-
-A disabled plugin is never `packadd`-ed or handed to native `vim.pack`, and any direct `require()` of it
-returns a harmless mock so unconditional `require`s in your config don't error.
-
-## ⚙️ Default Configuration
-
-You can override the default UI settings in your `.setup()` function:
-
-```lua
-require("pack").setup({
-  ui = {
-    border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
-    icons = {
-      loaded = "●",
-      not_loaded = "○",
-      error = "✖",
-      sync = "↺"
-    }
-  }
-})
-```
 
 ## 📊 Comparison Matrix
 
