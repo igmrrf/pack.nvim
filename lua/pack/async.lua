@@ -271,7 +271,17 @@ M.outdated_cooldown = 300
 function M.run_queued(items, worker, limit)
   limit = limit or M.max_concurrency
   local idx, inflight = 0, 0
+  -- `pumping` collapses a synchronously-completing worker (e.g. check_outdated
+  -- bailing before spawning git) into the running loop instead of recursing:
+  -- its inline done() decrements inflight and the re-entrant pump() returns
+  -- immediately, letting the outer while pick up the freed slot. Without this,
+  -- N sync completions recurse N deep and can overflow the stack.
+  local pumping = false
   local function pump()
+    if pumping then
+      return
+    end
+    pumping = true
     while inflight < limit and idx < #items do
       idx = idx + 1
       inflight = inflight + 1
@@ -286,6 +296,7 @@ function M.run_queued(items, worker, limit)
         pump()
       end)
     end
+    pumping = false
   end
   pump()
 end
