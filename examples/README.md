@@ -15,3 +15,4 @@ This directory contains full configuration examples demonstrating different ways
 - [05_custom_ui.lua](./05_custom_ui.lua): Shows how to override the dashboard aesthetics with custom borders and icons.
 - [06_native_vim_pack_bootstrap.lua](./06_native_vim_pack_bootstrap.lua): Explains how to leverage Neovim's built-in `vim.pack.add` to natively fetch and install `pack.nvim` itself.
 - [07_all_features_spec.lua](./07_all_features_spec.lua): An exhaustive reference file demonstrating every possible configuration option and feature you can define in a plugin spec.
+- [08_modular_configuration.lua](./08_modular_configuration.lua): Shows how to use `{ import = "plugins" }` to automatically load plugin specs by just returning tables from your files.

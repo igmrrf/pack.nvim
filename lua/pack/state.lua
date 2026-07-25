@@ -220,7 +220,7 @@ function M.remove_plugin(name)
 end
 
 function M.init(config)
-  M.plugins = {}
+  M.plugins = M.plugins or {}
   M.generation = M.generation + 1
   for _, p in ipairs(config.plugins) do
     M.add_plugin(p, config)
