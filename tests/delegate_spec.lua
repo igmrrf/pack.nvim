@@ -164,4 +164,30 @@ describe("pack.init native delegation", function()
     assert.equals("cafebabe", p.rev)
     assert.equals("installed", p.status)
   end)
+
+  it("installs the vim.pack.add wrapper and reconciles native plugins in setup", function()
+    local pack = require("pack")
+    -- Note: no local finally/restore here -- the describe-level after_each
+    -- (above) unconditionally restores vim.pack = orig_vim_pack after every
+    -- test, including this one, so it's covered without relying on a
+    -- `finally` global (not provided by this repo's plenary busted shim).
+    local fake_native = {
+      add = function() end,
+      get = function()
+        return { { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = "/x/adopted.nvim" } }
+      end,
+      del = function() end,
+      update = function() end,
+    }
+    vim.pack = fake_native
+
+    pack.setup({ plugins = {} })
+
+    -- Wrapper is installed (not the raw native add).
+    assert.are_not.equal(fake_native.add, vim.pack.add)
+    -- Native-only plugin was adopted during setup.
+    local a = require("pack.state").get_plugins()["adopted.nvim"]
+    assert.is_not_nil(a)
+    assert.is_false(a.managed)
+  end)
 end)
