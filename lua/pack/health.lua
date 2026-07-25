@@ -35,7 +35,7 @@ function M.check()
 
   -- Per-plugin status -------------------------------------------------------
   local plugins = state.get_plugins()
-  local counts = { loaded = 0, installed = 0, missing = 0, error = 0, updating = 0, disabled = 0 }
+  local counts = { loaded = 0, installed = 0, missing = 0, error = 0, updating = 0, disabled = 0, unknown = 0 }
   local total = 0
   for _, p in pairs(plugins) do
     total = total + 1
@@ -43,6 +43,10 @@ function M.check()
       counts.disabled = counts.disabled + 1
     elseif counts[p.status] ~= nil then
       counts[p.status] = counts[p.status] + 1
+    else
+      -- Any unrecognized/"unknown" status still counts toward the total so the
+      -- summary reconciles instead of silently dropping the plugin.
+      counts.unknown = counts.unknown + 1
     end
     if p.status == "error" and not p.disabled then
       health.warn("plugin failed to load: " .. p.name)
@@ -51,10 +55,14 @@ function M.check()
       health.warn("plugin not installed yet: " .. p.name)
     end
   end
-  health.info(string.format(
+  local summary = string.format(
     "%d plugin(s): %d loaded, %d installed, %d missing, %d error, %d disabled",
     total, counts.loaded, counts.installed, counts.missing, counts.error, counts.disabled
-  ))
+  )
+  if counts.unknown > 0 then
+    summary = summary .. string.format(", %d unknown", counts.unknown)
+  end
+  health.info(summary)
   if counts.error == 0 and counts.missing == 0 then
     health.ok("all configured plugins are installed and loadable")
   end

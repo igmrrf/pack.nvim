@@ -2,6 +2,20 @@ local state = require("pack.state")
 
 local M = {}
 
+-- Path of the precompiled ftdetect cache. Overridable for tests so each test
+-- writes an isolated file instead of racing on the shared
+-- stdpath('data')/pack_ftdetect_cache.lua (a scheduled/other-test build_cache
+-- could otherwise overwrite it mid-assert).
+local ftdetect_cache_override = nil
+
+local function ftdetect_cache_path()
+  return ftdetect_cache_override or vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
+end
+
+function M._set_ftdetect_cache_path_for_testing(path)
+  ftdetect_cache_override = path
+end
+
 -- Generate :help tags for a plugin's doc/ directory so `:help <tag>` works for
 -- managed plugins (native vim.pack / :packadd does not do this automatically).
 local function gen_helptags(dir)
@@ -249,7 +263,7 @@ function M.enable(p)
 end
 
 function M.build_cache()
-  local cache_file = vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
+  local cache_file = ftdetect_cache_path()
   local plugins = require("pack.state").get_plugins()
   local lines = {}
   for _, p in pairs(plugins) do
@@ -307,7 +321,7 @@ local function resolve_plugin(modname)
 end
 
 function M.init(config)
-  pcall(dofile, vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua"))
+  pcall(dofile, ftdetect_cache_path())
 
   -- Intercept requires for disabled plugins to prevent configuration crashes.
   -- If a disabled module is required directly (not inside pcall), we return a deep mock table.

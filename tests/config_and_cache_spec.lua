@@ -85,10 +85,14 @@ describe("pack.loader local plugin load (1.5)", function()
 end)
 
 describe("pack.loader ftdetect cache (1.6)", function()
-  local cache_file = vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
+  -- Isolated per test by helpers.reset(); read the same override path here so we
+  -- assert on this test's own file, not the shared stdpath('data') one.
+  local cache_file
 
   before_each(function()
+    cache_file = vim.fn.tempname()
     helpers.reset()
+    loader._set_ftdetect_cache_path_for_testing(cache_file)
   end)
 
   after_each(function()

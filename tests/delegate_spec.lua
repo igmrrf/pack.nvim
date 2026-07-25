@@ -132,6 +132,26 @@ describe("pack.init native delegation", function()
     assert.equals(1, #fake.updated)
   end)
 
+  it("re-running setup on top of the wrapper keeps delegating to real native", function()
+    do_setup({ "user/foo.nvim" })
+    -- vim.pack is now OUR wrapper. Re-run setup the way `:source $MYVIMRC` does,
+    -- WITHOUT restoring vim.pack first. Before the re-entrancy guard this made
+    -- native_pack point at the wrapper, so update/del/add recursed forever and
+    -- installs silently no-oped.
+    pack.setup({ plugins = {} })
+
+    -- native_pack must still be the real native (the fake), not the wrapper.
+    assert.equals(fake, pack.native_pack)
+
+    local before_updates = #fake.updated
+    vim.pack.update() -- would infinite-recurse before the fix
+    assert.equals(before_updates + 1, #fake.updated)
+
+    -- Installs must still reach native after a re-setup.
+    vim.pack.add({ "user/re.nvim" })
+    assert.equals("re.nvim", fake.added[#fake.added].name)
+  end)
+
   it(":Pack sync delegates to native update-all", function()
     do_setup({ "user/foo.nvim" })
     vim.cmd("Pack sync")
