@@ -185,15 +185,34 @@ end
 function M.setup(opts)
   -- Extract the raw plugins spec but DO NOT resolve it yet; load_plugins must run
   -- after the wrapper is installed so imperative `vim.pack.add` files register.
+  -- Copy `plugins` out instead of nil-ing it on the caller's table: setup must not
+  -- mutate the opts the user passed in (it may be shared/reused).
   local raw_plugins = opts and opts.plugins or nil
-  if opts then opts.plugins = nil end
-  M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  local merge_opts = opts
+  if opts and opts.plugins ~= nil then
+    merge_opts = {}
+    for k, v in pairs(opts) do
+      if k ~= "plugins" then merge_opts[k] = v end
+    end
+  end
+  M.config = vim.tbl_deep_extend("force", M.config, merge_opts or {})
   if M.config.performance and M.config.performance.vim_loader and vim.loader then
     vim.loader.enable()
   end
 
   -- Delegate all git operations to native vim.pack (preserved on M.native_pack).
-  M.native_pack = vim.pack
+  -- Guard re-entrant setup (e.g. `:source $MYVIMRC`): on the second call vim.pack
+  -- is already OUR wrapper. Adopting it as native would make native_pack.add/
+  -- update/del recurse into the wrapper forever (and drop the load callback, so
+  -- real installs silently no-op). Detect the wrapper by its tag and reuse the
+  -- real native we preserved the first time; otherwise adopt whatever vim.pack
+  -- currently is (real native, or a test's fake) and remember it as the real one.
+  if rawget(vim.pack, "__pack_wrapper") and M._real_native then
+    M.native_pack = M._real_native
+  else
+    M.native_pack = vim.pack
+    M._real_native = vim.pack
+  end
   if not (M.native_pack and M.native_pack.add) then
     vim.notify("pack.nvim requires Neovim 0.12+ (native vim.pack)", vim.log.levels.ERROR)
     return
@@ -210,7 +229,7 @@ function M.setup(opts)
 
   -- Lazy-aware wrapper installed BEFORE load_plugins so imperative vim.pack.add
   -- calls (including files pulled in by `import`) route through pack.nvim.
-  vim.pack = setmetatable({}, { __index = M.native_pack })
+  vim.pack = setmetatable({ __pack_wrapper = true }, { __index = M.native_pack })
   vim.pack.add = function(specs)
     M.add(specs)
   end
