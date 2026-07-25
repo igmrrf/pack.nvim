@@ -247,8 +247,8 @@ Subcommands with a `<name>` argument tab-complete against your configured plugin
 | Dashboard View | Plugin Quick Details |
 | :---: | :---: |
 | **All Plugins**<br>![All Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/All.jpg) | **Detailed Info Popup (`<Enter>` / `K`)**<br>![Plugin Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/All_info.jpg) |
-| **Outdated Updates View**<br>![Outdated Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated.jpg) | **Outdated Plugin Info & Diff**<br>![Outdated Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated_info.png) |
-| **Disabled Plugins View**<br>![Disabled Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled.png) | **Disabled Plugin Info**<br>![Disabled Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled_info.png) |
+| **Outdated Updates View**<br>![Outdated Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated.jpg) | **Outdated Plugin Info & Diff**<br>![Outdated Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Outdated_info.jpg) |
+| **Disabled Plugins View**<br>![Disabled Plugins](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled.jpg) | **Disabled Plugin Info**<br>![Disabled Info](https://media.githubusercontent.com/media/igmrrf/brand-assets/refs/heads/main/projects/pack.nvim/Disabled_info.jpg) |
 
 ## ⌨️ Dashboard Keymaps
 
