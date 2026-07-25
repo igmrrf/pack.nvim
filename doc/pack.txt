@@ -66,6 +66,10 @@ sharp edges:
   files with declarative specs, eager-load `priority` ordering is only
   guaranteed among declarative plugins; imperative-import plugins load in
   import order during `setup()`, not in the global priority sort.
+- If the same plugin is registered both by an imperative `vim.pack.add`
+  during an import and by a declarative spec, the first registration wins
+  and the later spec's fields (lazy/config/keys/opts) are silently ignored;
+  declare each plugin once, in one style.
 
 ==============================================================================
 CONFIGURATION                                                *pack-configuration*
