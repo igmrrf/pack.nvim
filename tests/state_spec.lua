@@ -1,3 +1,7 @@
+-- Clear any cached modules
+package.loaded["pack.state"] = nil
+package.loaded["pack.persist"] = nil
+
 local state = require("pack.state")
 local persist = require("pack.persist")
 
@@ -121,5 +125,60 @@ describe("pack.state", function()
     state.reconcile_from_native(fake_native)
 
     assert.equals("installed", p.status)
+  end)
+
+  it("declared plugins are marked managed = true", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    assert.is_true(state.get_plugins()["foo.nvim"].managed)
+  end)
+
+  it("reconcile_from_native adopts an unknown native plugin as managed = false", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local rtp_dir = vim.api.nvim_list_runtime_paths()[1]
+    local fake_native = {
+      get = function()
+        return {
+          { spec = { name = "foo.nvim" }, path = "/some/foo.nvim", rev = "aaa" },
+          { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = rtp_dir, rev = "bbb" },
+        }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+    local a = state.get_plugins()["adopted.nvim"]
+    assert.is_not_nil(a)
+    assert.is_false(a.managed)
+    assert.equals("https://github.com/x/adopted.nvim", a.url)
+    assert.equals("loaded", a.status) -- path is on runtimepath
+    assert.equals(50, a.priority)
+    assert.is_false(a.disabled)
+  end)
+
+  it("reconcile_from_native does not overwrite a managed entry on name collision", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local before = state.get_plugins()["foo.nvim"]
+    before.status = "installed"
+    local fake_native = {
+      get = function()
+        return { { spec = { name = "foo.nvim" }, path = "/new/path/foo.nvim", rev = "ccc" } }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+    local after = state.get_plugins()["foo.nvim"]
+    assert.is_true(after.managed) -- still managed, not clobbered
+    assert.equals("/new/path/foo.nvim", after.dir) -- dir still refreshed
+    assert.equals("ccc", after.rev)
+  end)
+
+  it("reconcile_from_native bumps generation only when it adopts", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local gen0 = state.generation
+    state.reconcile_from_native({ get = function()
+      return { { spec = { name = "foo.nvim" }, path = "/p/foo.nvim" } }
+    end })
+    assert.equals(gen0, state.generation) -- no new plugin, no bump
+    state.reconcile_from_native({ get = function()
+      return { { spec = { name = "new.nvim", src = "https://github.com/x/new.nvim" }, path = "/p/new.nvim" } }
+    end })
+    assert.equals(gen0 + 1, state.generation) -- one adopted
   end)
 end)
