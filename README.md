@@ -207,6 +207,10 @@ loader. The install location and lockfile are owned by native `vim.pack` and are
     guaranteed *among declarative plugins*. Plugins registered via imperative `vim.pack.add` calls
     inside `{ import = ... }` files load in import order during `setup()`, not as part of the global
     priority sort.
+*   **First registration wins**: if the same plugin is registered both by an imperative
+    `vim.pack.add` during an import and by a declarative spec, the first registration wins and the
+    later spec's fields (`lazy`/`config`/`keys`/`opts`) are silently ignored; declare each plugin
+    once, in one style.
 
 ### Bulk keymaps
 
