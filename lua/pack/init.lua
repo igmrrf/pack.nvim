@@ -183,38 +183,27 @@ local function native_call(desc, fn, ...)
 end
 
 function M.setup(opts)
-  local plugins
-  if opts and opts.plugins then
-    plugins = load_plugins(opts.plugins)
-    opts.plugins = nil
-  end
+  -- Extract the raw plugins spec but DO NOT resolve it yet; load_plugins must run
+  -- after the wrapper is installed so imperative `vim.pack.add` files register.
+  local raw_plugins = opts and opts.plugins or nil
+  if opts then opts.plugins = nil end
   M.config = vim.tbl_deep_extend("force", M.config, opts or {})
   if M.config.performance and M.config.performance.vim_loader and vim.loader then
     vim.loader.enable()
   end
-  M.config.plugins = plugins or M.config.plugins
 
-  -- Delegate all git operations to Neovim 0.12+ native vim.pack (preserved on
-  -- M.native_pack). pack.nvim layers lazy-loading, config/opts, build hooks and
-  -- the dashboard on top; native owns clone/checkout/update/lockfile/pinning.
+  -- Delegate all git operations to native vim.pack (preserved on M.native_pack).
   M.native_pack = vim.pack
   if not (M.native_pack and M.native_pack.add) then
     vim.notify("pack.nvim requires Neovim 0.12+ (native vim.pack)", vim.log.levels.ERROR)
     return
   end
 
-  state.init(M.config)
   loader.init(M.config)
-
-  -- Register build hooks BEFORE installing so PackChanged(install) events from
-  -- the initial add() are caught.
   require("pack.async").setup_build_hooks()
 
-  -- Install (native) + load (ours) every configured plugin. confirm=false so
-  -- startup installs run silently rather than prompting.
-  M._install_and_load(collect_native_specs(state.get_plugins()), false)
-
-  -- Lazy-aware wrapper. Unoverridden methods (get, ...) fall through to native.
+  -- Lazy-aware wrapper installed BEFORE load_plugins so imperative vim.pack.add
+  -- calls (including files pulled in by `import`) route through pack.nvim.
   vim.pack = setmetatable({}, { __index = M.native_pack })
   vim.pack.add = function(specs)
     M.add(specs)
@@ -224,20 +213,29 @@ function M.setup(opts)
     for _, name in ipairs(names) do
       local p = state.get_plugins()[name]
       if p then
-        -- Tear down lazy triggers (autocmds/commands/keymaps) before dropping,
-        -- otherwise they leak and fire against a plugin that no longer exists.
         pcall(function() loader.remove_triggers(p) end)
         state.remove_plugin(name)
       end
     end
-    -- Native removes the dir + lockfile entry.
     native_call("del", M.native_pack.del, names)
   end
   vim.pack.update = function(names, update_opts)
-    -- Forward native's second arg (force/target/...) instead of dropping it, and
-    -- guard against a native API mismatch.
     native_call("update", M.native_pack.update, names, update_opts)
   end
+
+  -- Now that the wrapper is live, resolve declarative specs and any imperative
+  -- files (which call the wrapped vim.pack.add and register as they load).
+  local plugins = load_plugins(raw_plugins)
+  M.config.plugins = plugins or M.config.plugins
+
+  state.init(M.config)
+
+  -- Install (native) + load (ours) every configured, non-disabled plugin.
+  M._install_and_load(collect_native_specs(state.get_plugins()), false)
+
+  -- Adopt anything native already has on disk that was never declared to us
+  -- (bootstrap line, pre-setup calls). Runs now so state is correct immediately.
+  state.reconcile_from_native(M.native_pack)
 
   -- create commands
   vim.api.nvim_create_user_command("Pack", function(opts)
