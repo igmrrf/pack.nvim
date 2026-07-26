@@ -393,6 +393,24 @@ function M.open(config)
     style = "minimal"
   })
   
+  if vim.v.vim_did_enter == 0 then
+    vim.api.nvim_create_autocmd("VimEnter", {
+      group = vim.api.nvim_create_augroup("pack_ui_startup_focus", { clear = true }),
+      once = true,
+      callback = function()
+        if win_id and vim.api.nvim_win_is_valid(win_id) then
+          vim.api.nvim_set_current_win(win_id)
+        end
+      end,
+    })
+  else
+    vim.schedule(function()
+      if win_id and vim.api.nvim_win_is_valid(win_id) then
+        vim.api.nvim_set_current_win(win_id)
+      end
+    end)
+  end
+  
   vim.api.nvim_create_autocmd("VimResized", {
     group = vim.api.nvim_create_augroup("pack_ui_resize", { clear = true }),
     callback = function()
@@ -587,7 +605,7 @@ local function render_all_tab(lines, highlights)
     end
   end
 
-  render_group("Missing", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticError")
+  render_group("Not Installed", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticWarn")
   render_group("Installing", groups.installing, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Updating", groups.updating, config_ref.ui.icons.sync, "DiagnosticWarn")
   render_group("Building", groups.building, config_ref.ui.icons.sync, "DiagnosticWarn")

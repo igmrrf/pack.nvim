@@ -4,6 +4,7 @@ local loader = require("pack.loader")
 
 local M = {}
 
+
 M.config = {
   -- Install location and lockfile are owned by native vim.pack and are not
   -- configurable, so they are intentionally not part of this config table.
@@ -13,6 +14,8 @@ M.config = {
   plugins = {},
   ui = {
     border = "rounded",
+    auto_open = true, -- Automatically open dashboard float when uninstalled plugins exist
+    silent = nil,    -- Silences native vim.pack cmdline messages. If nil, defaults to auto_open
     icons = {
       loaded = "●",
       not_loaded = "○",
@@ -21,6 +24,23 @@ M.config = {
     }
   }
 }
+
+-- Silence native Neovim `vim.pack` cmdline notifications (e.g. "vim.pack: 100% updating")
+-- when silent=true or when auto_open=true (where dashboard float is the indicator).
+if not _G.__pack_silent_notify_hooked then
+  _G.__pack_silent_notify_hooked = true
+  local orig_notify = vim.notify
+  vim.notify = function(msg, level, opts)
+    local is_silent = (M.config and M.config.ui and M.config.ui.silent ~= nil)
+      and M.config.ui.silent
+      or (M.config and M.config.ui and M.config.ui.auto_open ~= false)
+
+    if is_silent and ((opts and opts.title == "vim.pack") or (type(msg) == "string" and (msg:match("^vim%.pack") or msg:match("vim%.pack%.updating")))) then
+      return
+    end
+    return orig_notify(msg, level, opts)
+  end
+end
 
 local function load_plugins(spec)
   if type(spec) == "table" then
@@ -137,7 +157,8 @@ function M._install_and_load(native_specs, confirm)
       end
     end
 
-    if has_uninstalled and package.loaded["pack.ui"] then
+    local auto_open = M.config and M.config.ui and (M.config.ui.auto_open ~= false)
+    if has_uninstalled and auto_open and package.loaded["pack.ui"] then
       pcall(function() require("pack.ui").open(M.config) end)
     end
 
