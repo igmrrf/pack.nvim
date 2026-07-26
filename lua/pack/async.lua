@@ -338,9 +338,12 @@ local function run_build_step(plugin, hook, cb)
     vim.schedule(function()
       local ok, err = pcall(hook, { path = plugin.dir, spec = plugin })
       if not ok then
+        append_log(plugin, "build hook failed: " .. tostring(err))
         vim.notify("pack: build hook failed for " .. plugin.name .. "\n" .. tostring(err), vim.log.levels.ERROR)
+        cb(false)
+      else
+        cb(true)
       end
-      cb()
     end)
   elseif type(hook) == "string" and hook:sub(1, 1) == ":" then
     -- Vim ex-command form, e.g. build = ":TSUpdate".
@@ -357,9 +360,12 @@ local function run_build_step(plugin, hook, cb)
       end
       local ok, err = pcall(vim.cmd, hook:sub(2))
       if not ok then
+        append_log(plugin, "build command failed: " .. tostring(err))
         vim.notify("pack: build command failed for " .. plugin.name .. ": " .. tostring(err), vim.log.levels.ERROR)
+        cb(false)
+      else
+        cb(true)
       end
-      cb()
     end)
   elseif type(hook) == "string" then
     -- SECURITY: a shell build hook runs verbatim (arbitrary shell). Trusted-spec
@@ -381,23 +387,27 @@ local function run_build_step(plugin, hook, cb)
           append_log(plugin, line)
         end
         if res.code ~= 0 then
+          append_log(plugin, "build hook exit code: " .. tostring(res.code))
           vim.notify(
             "pack: build hook failed for " .. plugin.name .. " (exit " .. tostring(res.code) .. ")",
             vim.log.levels.ERROR
           )
+          cb(false)
+        else
+          cb(true)
         end
-        cb()
       end)
     end)
     if not ok then
+      append_log(plugin, "could not run build hook: " .. tostring(err))
       vim.notify(
         "pack: could not run build hook for " .. plugin.name .. ": " .. tostring(err),
         vim.log.levels.ERROR
       )
-      cb()
+      cb(false)
     end
   else
-    cb()
+    cb(true)
   end
 end
 
@@ -420,9 +430,25 @@ function M.run_build_hook(plugin, done_cb)
 
   local steps = type(build) == "table" and build or { build }
   local i = 0
-  local function next_step()
+  local build_failed = false
+  local function next_step(step_ok)
+    if step_ok == false then
+      build_failed = true
+    end
     i = i + 1
     if i > #steps then
+      if build_failed then
+        state.update_status(plugin.name, "error")
+      else
+        state.update_status(plugin.name, status_before or "installed")
+      end
+      ui_update()
+      return done_cb()
+    end
+    run_build_step(plugin, steps[i], next_step)
+  end
+  next_step(true)
+end
       state.update_status(plugin.name, status_before or "installed")
       ui_update()
       return done_cb()
