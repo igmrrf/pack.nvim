@@ -346,6 +346,15 @@ local function run_build_step(plugin, hook, cb)
     -- Vim ex-command form, e.g. build = ":TSUpdate".
     vim.schedule(function()
       append_log(plugin, "$ " .. hook)
+      if plugin.dir and vim.fn.isdirectory(plugin.dir) == 1 then
+        vim.opt.rtp:append(plugin.dir)
+        local plugin_dir = plugin.dir .. "/plugin"
+        if vim.fn.isdirectory(plugin_dir) == 1 then
+          for _, f in ipairs(vim.fn.glob(plugin_dir .. "/**/*.{vim,lua}", false, true)) do
+            pcall(vim.cmd, "source " .. f)
+          end
+        end
+      end
       local ok, err = pcall(vim.cmd, hook:sub(2))
       if not ok then
         vim.notify("pack: build command failed for " .. plugin.name .. ": " .. tostring(err), vim.log.levels.ERROR)

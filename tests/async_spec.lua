@@ -310,6 +310,25 @@ describe("pack.async.run_build_hook", function()
     _G.PACK_BUILD_CMD_RAN = nil
   end)
 
+  it("sources plugin directory commands before executing ':' ex-command build hooks", function()
+    local dir = vim.fn.tempname() .. "-plugin-hook"
+    vim.fn.mkdir(dir .. "/plugin", "p")
+    vim.fn.writefile({ "vim.api.nvim_create_user_command('LazySourcedCmd', function() _G.PACK_SOURCED_RAN = true end, {})" }, dir .. "/plugin/test.lua")
+
+    _G.PACK_SOURCED_RAN = nil
+    local p = fixture_plugin(":LazySourcedCmd")
+    p.dir = dir
+
+    local done = false
+    async.run_build_hook(p, function() done = true end)
+    assert.is_true(vim.wait(500, function() return done end, 10), "build did not finish")
+    assert.is_true(_G.PACK_SOURCED_RAN, "':' build hook must source plugin/ files before executing command")
+
+    if pcall(vim.api.nvim_del_user_command, "LazySourcedCmd") then end
+    _G.PACK_SOURCED_RAN = nil
+    vim.fn.delete(dir, "rf")
+  end)
+
   it("runs a list of build hooks in sequence and calls done exactly once", function()
     local order = {}
     local p = fixture_plugin({
