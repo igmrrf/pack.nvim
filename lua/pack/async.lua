@@ -423,6 +423,7 @@ function M.run_build_hook(plugin, done_cb)
 
   local status_before = plugin.status
   state.update_status(plugin.name, "building")
+  plugin.status = "building"
   ui_update()
   if package.loaded["pack.ui"] then
     require("pack.ui").ensure_spinner()
@@ -437,25 +438,15 @@ function M.run_build_hook(plugin, done_cb)
     end
     i = i + 1
     if i > #steps then
-      if build_failed then
-        state.update_status(plugin.name, "error")
-      else
-        state.update_status(plugin.name, status_before or "installed")
-      end
+      local target_status = build_failed and "error" or (status_before or "installed")
+      state.update_status(plugin.name, target_status)
+      plugin.status = target_status
       ui_update()
       return done_cb()
     end
     run_build_step(plugin, steps[i], next_step)
   end
   next_step(true)
-end
-      state.update_status(plugin.name, status_before or "installed")
-      ui_update()
-      return done_cb()
-    end
-    run_build_step(plugin, steps[i], next_step)
-  end
-  next_step()
 end
 
 function M.show_diff()
