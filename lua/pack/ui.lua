@@ -9,8 +9,15 @@ local plugin_map = {}
 local ns_id = vim.api.nvim_create_namespace("pack")
 local expanded_plugins = {}
 
+local selected_plugins = {}
+
 local current_tab = "all"
 local TAB_ORDER = { "all", "outdated", "disabled" }
+local TAB_LABELS = {
+  all = "Plugins",
+  outdated = "Updates",
+  disabled = "Disabled",
+}
 local search_term = ""
 
 -- Single dashboard-wide loading spinner. A repeating timer advances the frame
@@ -107,9 +114,13 @@ function M.filter()
 end
 
 local KEYMAP_HELP = {
-  { key = "q", scope = "all", desc = "close" },
-  { key = "g?", scope = "all", desc = "show this help" },
+  { key = "q", scope = "all", desc = "close dashboard" },
+  { key = "g?", scope = "all", desc = "show this help popup" },
   { key = "S", scope = "all", desc = "sync all (install missing, pull updates)" },
+  { key = "C", scope = "all", desc = "clean unused plugins (no longer in spec)" },
+  { key = "X", scope = "all", desc = "uninstall cursor/selected plugin from disk" },
+  { key = "<Space>", scope = "all", desc = "toggle selection for bulk action" },
+  { key = "v", scope = "all", desc = "clear all selections" },
   { key = "Tab", scope = "all", desc = "cycle tabs" },
   { key = "1/2/3", scope = "all", desc = "go to tab 1/2/3 directly" },
   { key = "Enter", scope = "all", desc = "toggle inline details for plugin" },
@@ -117,10 +128,10 @@ local KEYMAP_HELP = {
   { key = "l", scope = "all", desc = "view install/update logs" },
   { key = "p", scope = "all", desc = "show startup profile (load times & bar chart)" },
   { key = "d", scope = "all", desc = "view pending updates diff" },
-  { key = "x", scope = "All, Disabled", desc = "toggle disable/enable" },
+  { key = "x", scope = "Plugins, Disabled", desc = "toggle disable/enable (cursor/selected)" },
   { key = "c", scope = "all", desc = "check for outdated plugins" },
-  { key = "u", scope = "Outdated", desc = "update plugin" },
-  { key = "U", scope = "Outdated", desc = "update all outdated plugins" },
+  { key = "u", scope = "Updates", desc = "update cursor/selected plugin" },
+  { key = "U", scope = "Updates", desc = "update all outdated plugins" },
   { key = "/", scope = "all", desc = "filter plugins (name, cat:category, tag:tag)" },
 }
 
@@ -189,11 +200,91 @@ function M.open_popup(lines, opts)
 end
 
 function M.show_help()
-  local lines = { "  Pack Keymaps", "  ==============", "" }
+  local lines = {
+    "  Pack Keymaps",
+    "  ============",
+    "",
+    string.format("  %-10s %-18s %s", "KEY", "SCOPE", "DESCRIPTION"),
+    string.format("  %-10s %-18s %s", "---", "-----", "-----------"),
+  }
   for _, entry in ipairs(KEYMAP_HELP) do
-    table.insert(lines, string.format("  %-7s %-14s %s", entry.key, entry.scope, entry.desc))
+    table.insert(lines, string.format("  %-10s %-18s %s", entry.key, entry.scope, entry.desc))
   end
-  open_popup(lines, { close_keys = { "q", "g?", "<Esc>" } })
+  open_popup(lines, { close_keys = { "q", "g?", "<Esc>" }, width_pct = 0.75 })
+end
+
+function M.toggle_select()
+  local p = plugin_at_cursor()
+  if not p then return end
+  if selected_plugins[p.name] then
+    selected_plugins[p.name] = nil
+  else
+    selected_plugins[p.name] = true
+  end
+  M.update()
+end
+
+function M.clear_select()
+  selected_plugins = {}
+  M.update()
+end
+
+function M.clean()
+  local init = require("pack")
+  local ok_get, managed = pcall(function()
+    return init.native_pack.get and init.native_pack.get() or {}
+  end)
+  if not ok_get then managed = {} end
+  local configured = state.get_plugins()
+  local removed = 0
+  for _, entry in ipairs(managed) do
+    local name = entry.spec and entry.spec.name
+    if name and not configured[name] then
+      pcall(function() init.native_pack.del({ name }) end)
+      removed = removed + 1
+    end
+  end
+  if removed > 0 then
+    vim.notify("pack: Removed " .. removed .. " unused plugin(s)", vim.log.levels.INFO)
+  else
+    vim.notify("pack: Already clean", vim.log.levels.INFO)
+  end
+  M.update()
+end
+
+function M.uninstall()
+  local targets = {}
+  for name, _ in pairs(selected_plugins) do
+    table.insert(targets, name)
+  end
+  if #targets == 0 then
+    local p = plugin_at_cursor()
+    if p then table.insert(targets, p.name) end
+  end
+
+  if #targets == 0 then
+    vim.notify("pack: No plugin selected for uninstallation", vim.log.levels.WARN)
+    return
+  end
+
+  local msg = #targets == 1
+    and string.format("Uninstall '%s' from disk? (y/N): ", targets[1])
+    or string.format("Uninstall %d selected plugins from disk? (y/N): ", #targets)
+
+  vim.ui.input({ prompt = msg }, function(input)
+    if input and input:lower():sub(1, 1) == "y" then
+      for _, name in ipairs(targets) do
+        pcall(function() require("pack").native_pack.del({ name }) end)
+        state.update_status(name, "missing")
+        selected_plugins[name] = nil
+      end
+      vim.notify(
+        string.format("pack: Uninstalled %d plugin(s). Remember to remove spec from your Lua config!", #targets),
+        vim.log.levels.INFO
+      )
+      M.update()
+    end
+  end)
 end
 
 local function plugin_at_cursor(win)
@@ -390,6 +481,8 @@ function M.open(config)
     row = row,
     col = col,
     border = config.ui.border,
+    title = " pack.nvim ",
+    title_pos = "center",
     style = "minimal"
   })
   
@@ -425,6 +518,8 @@ function M.open(config)
         height = h,
         row = math.floor((vim.o.lines - h) / 2),
         col = math.floor((vim.o.columns - w) / 2),
+        title = " pack.nvim ",
+        title_pos = "center",
       })
       M.update()
     end,
@@ -434,6 +529,10 @@ function M.open(config)
   vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
   vim.keymap.set("n", "g?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
   vim.keymap.set("n", "S", "<Cmd>Pack sync<CR>", opts)
+  vim.keymap.set("n", "C", "<Cmd>lua require('pack.ui').clean()<CR>", opts)
+  vim.keymap.set("n", "X", "<Cmd>lua require('pack.ui').uninstall()<CR>", opts)
+  vim.keymap.set("n", "<Space>", "<Cmd>lua require('pack.ui').toggle_select()<CR>", opts)
+  vim.keymap.set("n", "v", "<Cmd>lua require('pack.ui').clear_select()<CR>", opts)
   vim.keymap.set("n", "<CR>", "<Cmd>lua require('pack.ui').toggle_details()<CR>", opts)
   vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
   vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
@@ -571,6 +670,7 @@ local function render_all_tab(lines, highlights)
       table.insert(lines, string.format("  %s (%d)%s", name, #list, total_time_str))
       table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
       for _, p in ipairs(list) do
+        local sel_prefix = selected_plugins[p.name] and "[✓] " or ""
         local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
         local time_str = ""
         if p.load_time then
@@ -581,16 +681,21 @@ local function render_all_tab(lines, highlights)
           end
         end
         local tag = (p.managed == false) and "  (native)" or ""
-        local line = string.format("    %s %s %s%s%s", expand_icon, icon, p.name, time_str, tag)
+        local line = string.format("    %s%s %s %s%s%s", sel_prefix, expand_icon, icon, p.name, time_str, tag)
         table.insert(lines, line)
         plugin_map[#lines] = p
 
-        table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
-        local icon_start = 8
-        local icon_end = 8 + #icon
+        local col_offset = 4
+        if sel_prefix ~= "" then
+          table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #sel_prefix, hl = "DiagnosticOk" })
+          col_offset = col_offset + #sel_prefix
+        end
+        table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #expand_icon + 1, hl = "Comment" })
+        local icon_start = col_offset + #expand_icon + 1
+        local icon_end = icon_start + #icon
         table.insert(highlights, { line = #lines - 1, col_start = icon_start, col_end = icon_end, hl = hl_group })
         
-        local name_end = 8 + #icon + 1 + #p.name
+        local name_end = icon_end + 1 + #p.name
         if time_str ~= "" then
           table.insert(highlights, { line = #lines - 1, col_start = name_end, col_end = name_end + #time_str, hl = "Comment" })
         end
@@ -636,14 +741,21 @@ local function render_outdated_tab(lines, highlights)
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
 
   for _, p in ipairs(outdated) do
+    local sel_prefix = selected_plugins[p.name] and "[✓] " or ""
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
     local suffix = (p.status == "updating") and "updating…"
       or (p.status == "building") and "building…"
       or ((p.behind or 0) .. " behind")
-    table.insert(lines, string.format("    %s %s %s — %s", expand_icon, config_ref.ui.icons.sync, p.name, suffix))
+    table.insert(lines, string.format("    %s%s %s %s — %s", sel_prefix, expand_icon, config_ref.ui.icons.sync, p.name, suffix))
     plugin_map[#lines] = p
-    table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
-    table.insert(highlights, { line = #lines - 1, col_start = 8, col_end = 8 + #config_ref.ui.icons.sync, hl = "DiagnosticWarn" })
+    local col_offset = 4
+    if sel_prefix ~= "" then
+      table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #sel_prefix, hl = "DiagnosticOk" })
+      col_offset = col_offset + #sel_prefix
+    end
+    table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #expand_icon + 1, hl = "Comment" })
+    local icon_start = col_offset + #expand_icon + 1
+    table.insert(highlights, { line = #lines - 1, col_start = icon_start, col_end = icon_start + #config_ref.ui.icons.sync, hl = "DiagnosticWarn" })
     
     if expanded_plugins[p.name] then
       local branch_suffix = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""
@@ -693,14 +805,20 @@ local function render_disabled_tab(lines, highlights)
   table.insert(lines, "  Disabled (" .. #disabled .. ")")
   table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
   for _, p in ipairs(disabled) do
+    local sel_prefix = selected_plugins[p.name] and "[✓] " or ""
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
     local tag = (p.managed == false) and "  (native)" or ""
-    local line = string.format("    %s %s%s (%s)", expand_icon, p.name, tag, p.status)
+    local line = string.format("    %s%s %s%s (%s)", sel_prefix, expand_icon, p.name, tag, p.status)
     table.insert(lines, line)
     plugin_map[#lines] = p
-    table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })
+    local col_offset = 4
+    if sel_prefix ~= "" then
+      table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #sel_prefix, hl = "DiagnosticOk" })
+      col_offset = col_offset + #sel_prefix
+    end
+    table.insert(highlights, { line = #lines - 1, col_start = col_offset, col_end = col_offset + #expand_icon + 1, hl = "Comment" })
     if p.managed == false then
-      local tag_start = 4 + #expand_icon + 1 + #p.name
+      local tag_start = col_offset + #expand_icon + 1 + #p.name
       table.insert(highlights, { line = #lines - 1, col_start = tag_start, col_end = tag_start + #tag, hl = "Comment" })
     end
     add_plugin_details(p, lines, highlights, "      ")
@@ -734,16 +852,10 @@ function M.update()
     win_width = vim.api.nvim_win_get_width(win_id)
   end
 
-  local title_str = " Pack.nvim "
-  local title_pad = math.max(0, math.floor((win_width - #title_str) / 2))
-  local title_line = string.rep(" ", title_pad) .. title_str
-
   local help_str = "press g? for help"
   local help_pad = math.max(0, math.floor((win_width - #help_str) / 2))
   local help_line = string.rep(" ", help_pad) .. help_str
 
-  table.insert(lines, title_line)
-  table.insert(highlights, { line = #lines - 1, col_start = title_pad, col_end = title_pad + #title_str, hl = "Search" })
   table.insert(lines, help_line)
   table.insert(highlights, { line = #lines - 1, col_start = help_pad, col_end = help_pad + #help_str, hl = "Comment" })
 
@@ -765,7 +877,8 @@ function M.update()
   local tab_line = "  "
   for i, tab in ipairs(TAB_ORDER) do
     local is_active = (tab == current_tab)
-    local tab_text = string.format(" %d %s ", i, tab:sub(1,1):upper() .. tab:sub(2))
+    local label = TAB_LABELS[tab] or (tab:sub(1,1):upper() .. tab:sub(2))
+    local tab_text = string.format(" %d %s ", i, label)
     
     local start_col = #tab_line
     tab_line = tab_line .. tab_text
