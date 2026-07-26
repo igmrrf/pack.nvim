@@ -134,3 +134,56 @@ describe("pack.persist atomic write (4.x)", function()
     assert.equals(0, vim.fn.filereadable(tmp .. ".tmp"))
   end)
 end)
+
+describe("pack.init Windows path normalization (load_plugins)", function()
+  it("handles backslash path separators when matching lua module paths", function()
+    local pack = require("pack")
+    local orig_fn = vim.api.nvim_get_runtime_file
+    vim.api.nvim_get_runtime_file = function(pattern, all)
+      if pattern:find("lua/win_plugins") then
+        return { "C:\\Users\\test\\.config\\nvim\\lua\\win_plugins\\editor.lua" }
+      end
+      return orig_fn(pattern, all)
+    end
+
+    package.preload["win_plugins.editor"] = function()
+      return { "user/editor.nvim" }
+    end
+
+    local specs = pack._load_plugins("win_plugins")
+    vim.api.nvim_get_runtime_file = orig_fn
+    package.preload["win_plugins.editor"] = nil
+    package.loaded["win_plugins.editor"] = nil
+
+    assert.is_table(specs)
+    assert.equals(1, #specs)
+  end)
+end)
+
+describe("pack.init _install_and_load chunking and pcall guard", function()
+  it("chunks large native specs into batches and handles native_pack.add errors gracefully", function()
+    local pack = require("pack")
+    local added_chunks = {}
+    local orig_native = pack.native_pack
+
+    pack.native_pack = {
+      add = function(specs, opts)
+        table.insert(added_chunks, #specs)
+        if #added_chunks == 2 then
+          error("Simulated lock_repair git error")
+        end
+      end
+    }
+
+    local mock_specs = {}
+    for i = 1, 25 do
+      table.insert(mock_specs, { name = "plugin_" .. i, src = "http://example.com/" .. i })
+    end
+
+    local ok = pcall(pack._install_and_load, mock_specs, false)
+    pack.native_pack = orig_native
+
+    assert.is_true(ok, "_install_and_load must not raise an unhandled exception")
+    assert.same({ 10, 10, 5 }, added_chunks, "must chunk 25 specs into batches of 10, 10, 5")
+  end)
+end)
