@@ -155,6 +155,18 @@ describe("pack.ui", function()
       assert.is_nil(text:match("bar%.nvim"))
     end)
 
+    it("renders building plugins on the Outdated tab with building… suffix", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "building")
+      ui.open(config)
+
+      ui.cycle_tab() -- all -> outdated
+      local buf = vim.api.nvim_get_current_buf()
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+      assert.is_true(text:match("foo%.nvim — building…") ~= nil)
+    end)
+
     it("cycling from Disabled returns to All", function()
       local config = config_with({ "user/foo.nvim" })
       state.init(config)

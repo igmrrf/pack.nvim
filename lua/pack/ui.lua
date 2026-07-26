@@ -599,9 +599,11 @@ end
 local function render_outdated_tab(lines, highlights)
   local outdated = {}
   for _, p in pairs(state.get_plugins()) do
-    if not p.disabled and p.behind and p.behind > 0 then
-      if matches_search(p, search_term) then
-        table.insert(outdated, p)
+    if not p.disabled then
+      if (p.behind and p.behind > 0) or p.status == "updating" or p.status == "building" then
+        if matches_search(p, search_term) then
+          table.insert(outdated, p)
+        end
       end
     end
   end
@@ -617,7 +619,9 @@ local function render_outdated_tab(lines, highlights)
 
   for _, p in ipairs(outdated) do
     local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
-    local suffix = (p.status == "updating") and "updating…" or (p.behind .. " behind")
+    local suffix = (p.status == "updating") and "updating…"
+      or (p.status == "building") and "building…"
+      or ((p.behind or 0) .. " behind")
     table.insert(lines, string.format("    %s %s %s — %s", expand_icon, config_ref.ui.icons.sync, p.name, suffix))
     plugin_map[#lines] = p
     table.insert(highlights, { line = #lines - 1, col_start = 4, col_end = 7, hl = "Comment" })

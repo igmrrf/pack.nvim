@@ -504,11 +504,26 @@ function M.setup_build_hooks()
       -- load_fn also sets p.dir, but PackChanged(install) fires before it, so
       -- take the path straight from the event.
       p.dir = d.path or p.dir
-      local function maybe_build()
-        if p.build then
-          M.run_build_hook(p)
+      local function finish_update()
+        if d.kind == "update" then
+          if p.status_before_update and p.status ~= "error" then
+            state.update_status(name, p.status_before_update)
+            p.status_before_update = nil
+          end
+          state.set_behind(name, 0)
+          state.set_outdated_detail(name, {})
+          ui_update()
         end
       end
+
+      local function maybe_build()
+        if p.build then
+          M.run_build_hook(p, finish_update)
+        else
+          finish_update()
+        end
+      end
+
       -- Native vim.pack does not recurse submodules on INSTALL (it does on
       -- update). Initialize them first, and only run the build hook once they
       -- have populated -- a build that compiles submodule sources would
@@ -532,17 +547,6 @@ function M.setup_build_hooks()
         end
       else
         maybe_build()
-      end
-      -- After an update the plugin is at the new revision: clear the stale
-      -- outdated indicators and refresh the dashboard.
-      if d.kind == "update" then
-        if p.status_before_update then
-          state.update_status(name, p.status_before_update)
-          p.status_before_update = nil
-        end
-        state.set_behind(name, 0)
-        state.set_outdated_detail(name, {})
-        ui_update()
       end
     end,
   })
