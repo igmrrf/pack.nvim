@@ -65,7 +65,8 @@ local function load_plugins(spec)
   end
 
   for _, file in ipairs(files) do
-    local mod_path = file:match("lua/(.*)%.lua$")
+    local norm_file = file:gsub("\\", "/")
+    local mod_path = norm_file:match("lua/(.*)%.lua$")
     if mod_path then
       local mod_name = mod_path:gsub("/", ".")
       local ok, mod = pcall(require, mod_name)
@@ -110,12 +111,43 @@ local function collect_native_specs(plugins_map)
   return specs
 end
 
+local function chunk_array(arr, chunk_size)
+  local chunks = {}
+  for i = 1, #arr, chunk_size do
+    local chunk = {}
+    for j = i, math.min(i + chunk_size - 1, #arr) do
+      table.insert(chunk, arr[j])
+    end
+    table.insert(chunks, chunk)
+  end
+  return chunks
+end
+
 -- Hand a batch of native specs to native vim.pack (which clones/checks out and
 -- calls loader.load_fn per plugin instead of sourcing), then run our ordered
 -- loader. Native never touches runtimepath - we own all loading.
 function M._install_and_load(native_specs, confirm)
   if M.native_pack and M.native_pack.add and #native_specs > 0 then
-    M.native_pack.add(native_specs, { load = loader.load_fn, confirm = confirm })
+    local has_uninstalled = false
+    for _, spec in ipairs(native_specs) do
+      local p = state.get_plugins()[spec.name]
+      if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
+        has_uninstalled = true
+        break
+      end
+    end
+
+    if has_uninstalled and package.loaded["pack.ui"] then
+      pcall(function() require("pack.ui").open(M.config) end)
+    end
+
+    local chunks = chunk_array(native_specs, 10)
+    for _, chunk in ipairs(chunks) do
+      local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm })
+      if not ok then
+        vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+      end
+    end
   end
   -- Local (dir=) plugins never reach native; enqueue them for the same ordered
   -- load pass so they load at startup like everything else.

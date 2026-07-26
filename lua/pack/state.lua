@@ -367,35 +367,53 @@ local function resolve_version(p)
   return nil
 end
 
+local function sanitize_value(val)
+  local t = type(val)
+  if t == "boolean" or t == "number" or t == "string" then
+    return val
+  elseif t == "table" then
+    local res = {}
+    local count = 0
+    for k, v in pairs(val) do
+      if type(k) == "string" or type(k) == "number" then
+        local sv = sanitize_value(v)
+        if sv ~= nil then
+          res[k] = sv
+          count = count + 1
+        end
+      end
+    end
+    return count > 0 and res or nil
+  end
+  return nil
+end
+
 -- Translate an internal normalized plugin into a native vim.pack spec. All the
 -- lazy-loading / config metadata native has no concept of is stashed under
--- `data`, which round-trips through vim.pack.get() and PackChanged payloads
--- (functions survive vim.deepcopy by reference).
+-- `data` (sanitized for Vimscript C conversion).
 function M.to_native_spec(p)
   -- Local plugins are never handed to native vim.pack (nothing to clone).
   if p.is_local then
     return nil
   end
+  local raw_data = {
+    lazy = p.lazy,
+    event = p.event,
+    ft = p.ft,
+    cmd = p.cmd,
+    keys = p.keys,
+    pattern = p.pattern,
+    opts = p.opts,
+    build = type(p.build) == "string" and p.build or nil,
+    priority = p.priority,
+    main = p.main,
+    dependencies = p.dependencies,
+  }
   return {
     src = p.url,
     name = p.name,
     version = resolve_version(p),
-    data = {
-      lazy = p.lazy,
-      event = p.event,
-      ft = p.ft,
-      cmd = p.cmd,
-      keys = p.keys,
-      pattern = p.pattern,
-      config = p.config,
-      opts = p.opts,
-      build = p.build,
-      init = p.init_hook,
-      cond = p.cond,
-      priority = p.priority,
-      main = p.main,
-      dependencies = p.dependencies,
-    },
+    data = sanitize_value(raw_data) or {},
   }
 end
 
