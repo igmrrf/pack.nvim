@@ -239,6 +239,15 @@ function M.toggle_select()
 		selected_plugins[p.name] = true
 	end
 	M.update()
+
+	-- Advance cursor down to next line for fast fluid multi-selection
+	if win_id and vim.api.nvim_win_is_valid(win_id) then
+		local cursor = vim.api.nvim_win_get_cursor(win_id)
+		local line_count = vim.api.nvim_buf_line_count(buf_id)
+		if cursor[1] < line_count then
+			pcall(vim.api.nvim_win_set_cursor, win_id, { cursor[1] + 1, cursor[2] })
+		end
+	end
 end
 
 function M.clear_select()
@@ -437,38 +446,60 @@ function M.toggle_disabled()
 	if current_tab == "outdated" then
 		return
 	end
-	local p = plugin_at_cursor()
-	if not p then
-		return
+	local targets = {}
+	for name, _ in pairs(selected_plugins) do
+		local p = state.get_plugins()[name]
+		if p then
+			table.insert(targets, p)
+		end
+	end
+	if #targets == 0 then
+		local p = plugin_at_cursor()
+		if p then
+			table.insert(targets, p)
+		end
 	end
 
-	if p.managed == false then
-		vim.notify(
-			"pack: '" .. p.name .. "' is native/adopted — pack.nvim does not control its loading",
-			vim.log.levels.WARN
-		)
-		return
-	end
-
-	local new_disabled = not p.disabled
-	state.set_disabled(p.name, new_disabled)
-
-	if new_disabled then
-		if p.status == "loaded" then
+	for _, p in ipairs(targets) do
+		if p.managed == false then
 			vim.notify(
-				"pack: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
+				"pack: '" .. p.name .. "' is native/adopted — pack.nvim does not control its loading",
 				vim.log.levels.WARN
 			)
 		else
-			require("pack.loader").remove_triggers(p)
+			local new_disabled = not p.disabled
+			state.set_disabled(p.name, new_disabled)
+
+			if new_disabled then
+				if p.status == "loaded" then
+					vim.notify(
+						"pack: '" .. p.name .. "' disabled but already loaded - restart Neovim to fully unload it",
+						vim.log.levels.WARN
+					)
+				else
+					require("pack.loader").remove_triggers(p)
+				end
+			else
+				require("pack.loader").enable(p)
+			end
 		end
-	else
-		require("pack.loader").enable(p)
 	end
+	selected_plugins = {}
 	M.update()
 end
 
 function M.update_one()
+	local targets = {}
+	for name, _ in pairs(selected_plugins) do
+		table.insert(targets, name)
+	end
+
+	if #targets > 0 then
+		selected_plugins = {}
+		require("pack.async").update_plugins(targets)
+		return
+	end
+
 	if current_tab ~= "outdated" then
 		return
 	end
@@ -570,7 +601,7 @@ function M.open(config)
 		end,
 	})
 
-	local opts = { buffer = buf_id, noremap = true, silent = true }
+	local opts = { buffer = buf_id, noremap = true, silent = true, nowait = true }
 	vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
 	vim.keymap.set("n", "g?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
 	vim.keymap.set("n", "S", "<Cmd>Pack sync<CR>", opts)
@@ -1072,6 +1103,16 @@ function M.update()
 			end
 			if found_line then
 				cursor[1] = found_line
+			end
+		end
+
+		-- If cursor is on a non-plugin line (header/tab bar), jump to first plugin line
+		if not plugin_map[cursor[1]] then
+			for i = 1, #lines do
+				if plugin_map[i] then
+					cursor[1] = i
+					break
+				end
 			end
 		end
 

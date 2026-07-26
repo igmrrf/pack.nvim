@@ -539,5 +539,61 @@ describe("pack.ui", function()
       local text_after = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
       assert.is_falsy(text_after:match("%[✓%]"))
     end)
+
+    it("bulk disables all selected plugins when x is triggered", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "installed")
+      state.update_status("bar.nvim", "installed")
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+
+      local line_foo = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line_foo, 0 })
+      ui.toggle_select()
+
+      local line_bar = find_line(buf, "bar%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line_bar, 0 })
+      ui.toggle_select()
+
+      ui.toggle_disabled()
+      assert.is_true(state.get_plugins()["foo.nvim"].disabled)
+      assert.is_true(state.get_plugins()["bar.nvim"].disabled)
+    end)
+
+    it("bulk updates selected plugins when u is triggered regardless of current tab", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "installed")
+      state.update_status("bar.nvim", "installed")
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+
+      local line_foo = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line_foo, 0 })
+      ui.toggle_select()
+
+      local updated_names = {}
+      local async = require("pack.async")
+      local orig_update = async.update_plugins
+      async.update_plugins = function(names) updated_names = names end
+
+      ui.update_one()
+      async.update_plugins = orig_update
+
+      assert.equals(1, #updated_names)
+      assert.equals("foo.nvim", updated_names[1])
+    end)
+
+    it("positions cursor on the first plugin line when dashboard opens", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      local first_plugin_line = find_line(buf, "foo%.nvim")
+      assert.equals(first_plugin_line, cursor[1])
+    end)
   end)
 end)
