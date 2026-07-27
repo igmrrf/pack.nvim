@@ -393,7 +393,7 @@ function M.setup(opts)
 			end
 		elseif subcmd == "clean" then
 			-- Remove plugins native still manages (on disk / in lockfile) that are no
-			-- longer in the configured spec.
+			-- longer in the configured spec (or were tracked as unmanaged/adopted).
 			local ok_get, managed = pcall(function()
 				return M.native_pack.get and M.native_pack.get() or {}
 			end)
@@ -404,9 +404,9 @@ function M.setup(opts)
 			local removed = 0
 			for _, entry in ipairs(managed) do
 				local name = entry.spec and entry.spec.name
-				if name and not configured[name] then
+				if name and not (configured[name] and configured[name].managed) then
 					pcall(function()
-						M.native_pack.del({ name })
+						vim.pack.del({ name })
 					end)
 					vim.notify("pack: Removed unused plugin " .. name)
 					removed = removed + 1

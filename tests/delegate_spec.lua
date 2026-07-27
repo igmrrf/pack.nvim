@@ -166,6 +166,28 @@ describe("pack.init native delegation", function()
     assert.equals("lockfile", last.opts.target)
   end)
 
+  it(":Pack clean removes unmanaged/adopted plugins no longer in configured spec", function()
+    do_setup({ "user/foo.nvim" })
+    fake.get_result = {
+      { spec = { name = "foo.nvim" }, path = "/path/foo.nvim" },
+      { spec = { name = "old_deleted.nvim" }, path = "/path/old_deleted.nvim" },
+    }
+    -- Adopt old_deleted.nvim so it is present in state.plugins as managed = false
+    state.reconcile_from_native(require("pack").native_pack)
+    assert.is_not_nil(state.get_plugins()["old_deleted.nvim"])
+    assert.is_false(state.get_plugins()["old_deleted.nvim"].managed)
+
+    vim.cmd("Pack clean")
+
+    -- Check that native del was invoked for old_deleted.nvim
+    assert.equals(1, #fake.deleted)
+    assert.same({ "old_deleted.nvim" }, fake.deleted[1])
+    -- Check that old_deleted.nvim was removed from state
+    assert.is_nil(state.get_plugins()["old_deleted.nvim"])
+    -- Managed foo.nvim remains
+    assert.is_not_nil(state.get_plugins()["foo.nvim"])
+  end)
+
   it("vim.pack.get falls through to native via metatable", function()
     do_setup({ "user/foo.nvim" })
     fake.get_result = { "sentinel" }

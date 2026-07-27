@@ -267,9 +267,9 @@ function M.clean()
 	local removed = 0
 	for _, entry in ipairs(managed) do
 		local name = entry.spec and entry.spec.name
-		if name and not configured[name] then
+		if name and not (configured[name] and configured[name].managed) then
 			pcall(function()
-				init.native_pack.del({ name })
+				vim.pack.del({ name })
 			end)
 			removed = removed + 1
 		end
@@ -305,14 +305,19 @@ function M.uninstall()
 	vim.ui.input({ prompt = msg }, function(input)
 		if input and input:lower():sub(1, 1) == "y" then
 			for _, name in ipairs(targets) do
+				local p = state.get_plugins()[name]
 				pcall(function()
-					require("pack").native_pack.del({ name })
+					vim.pack.del({ name })
 				end)
-				state.update_status(name, "missing")
+				if p and p.managed == false then
+					state.remove_plugin(name)
+				else
+					state.update_status(name, "missing")
+				end
 				selected_plugins[name] = nil
 			end
 			vim.notify(
-				string.format("pack: Uninstalled %d plugin(s). Remember to remove spec from your Lua config!", #targets),
+				string.format("pack: Uninstalled %d plugin(s).", #targets),
 				vim.log.levels.INFO
 			)
 			M.update()
