@@ -118,10 +118,15 @@ local function normalize(plugin, config)
 		tags = { tags }
 	end
 
+	local is_lazy = plugin.lazy
+	if is_lazy == nil then
+		is_lazy = (plugin.cmd ~= nil or plugin.event ~= nil or plugin.ft ~= nil or plugin.keys ~= nil)
+	end
+
 	return {
 		url = full_url,
 		name = name,
-		lazy = plugin.lazy or false,
+		lazy = is_lazy,
 		cmd = plugin.cmd,
 		event = plugin.event,
 		ft = plugin.ft,

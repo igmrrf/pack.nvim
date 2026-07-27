@@ -194,4 +194,23 @@ describe("pack.state", function()
     assert.is_nil(plugins["foo.nvim"], "stale plugin from prior init must be cleared")
     assert.is_not_nil(plugins["bar.nvim"])
   end)
+
+  it("infers lazy = true when event, ft, cmd, or keys are present without explicit lazy", function()
+    state.init({
+      plugins = {
+        { "user/eventplug.nvim", event = "BufReadPost" },
+        { "user/ftplug.nvim", ft = "markdown" },
+        { "user/cmdplug.nvim", cmd = "Cmd" },
+        { "user/keyplug.nvim", keys = "<leader>k" },
+        { "user/eagerplug.nvim", event = "BufReadPost", lazy = false },
+      },
+    })
+    local p = state.get_plugins()
+    assert.is_true(p["eventplug.nvim"].lazy)
+    assert.is_true(p["ftplug.nvim"].lazy)
+    assert.is_true(p["cmdplug.nvim"].lazy)
+    assert.is_true(p["keyplug.nvim"].lazy)
+    assert.is_false(p["eagerplug.nvim"].lazy)
+  end)
 end)
+
