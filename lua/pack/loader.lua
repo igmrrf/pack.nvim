@@ -507,11 +507,10 @@ function M.load(name, opts)
 		end
 	end
 
-	loading[name] = nil
-
 	if p.cond ~= nil and not opts.cond_checked then
 		local cond_val = type(p.cond) == "function" and p.cond({ path = p.dir, spec = p }) or p.cond
 		if not cond_val then
+			loading[name] = nil
 			return
 		end
 	end
@@ -544,6 +543,8 @@ function M.load(name, opts)
 		-- packadd/local-load failed: record it so triggers stop re-attempting.
 		state.update_status(name, "error")
 	end
+
+	loading[name] = nil
 
 	if package.loaded["pack.ui"] then
 		require("pack.ui").update()

@@ -96,4 +96,28 @@ describe("pack.loader triggers", function()
     commands = vim.api.nvim_get_commands({})
     assert.is_nil(commands["CollisionCmd"])
   end)
+
+  it("prevents infinite recursion when a plugin require()s itself during loading", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        { "user/recursive.nvim", lazy = true, cmd = "RecCmd", dir = dir },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["recursive.nvim"]
+    p.status = "installed"
+
+    -- Simulate require() interceptor calling loader.load() while loading is in progress
+    p.config = function()
+      loader.load("recursive.nvim")
+    end
+
+    local ok = pcall(loader.load, "recursive.nvim")
+    assert.is_true(ok)
+    assert.equals("loaded", p.status)
+  end)
 end)
+
