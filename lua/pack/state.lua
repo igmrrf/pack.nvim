@@ -359,10 +359,7 @@ function M.reconcile_from_native(native_pack)
 	end
 
 	local function is_active(entry)
-		if entry.active ~= nil then
-			return entry.active
-		end
-		return entry.path ~= nil and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] or false
+		return entry.path ~= nil and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] == true
 	end
 
 	local adopted = 0
@@ -443,18 +440,54 @@ local function sanitize_value(val)
 	if t == "boolean" or t == "number" or t == "string" then
 		return val
 	elseif t == "table" then
-		local res = {}
-		local count = 0
+		local num_string_keys = 0
+		local num_number_keys = 0
+		local total_keys = 0
+		local temp = {}
+
 		for k, v in pairs(val) do
-			if type(k) == "string" or type(k) == "number" then
+			local kt = type(k)
+			if kt == "string" or kt == "number" then
 				local sv = sanitize_value(v)
 				if sv ~= nil then
-					res[k] = sv
-					count = count + 1
+					temp[k] = sv
+					total_keys = total_keys + 1
+					if kt == "string" then
+						num_string_keys = num_string_keys + 1
+					else
+						num_number_keys = num_number_keys + 1
+					end
 				end
 			end
 		end
-		return count > 0 and res or nil
+
+		if total_keys == 0 then
+			return nil
+		end
+
+		local is_pure_array = (num_string_keys == 0) and (num_number_keys == total_keys)
+		if is_pure_array then
+			for i = 1, total_keys do
+				if temp[i] == nil then
+					is_pure_array = false
+					break
+				end
+			end
+		end
+
+		if is_pure_array then
+			local res = {}
+			for i = 1, total_keys do
+				res[i] = temp[i]
+			end
+			return res
+		else
+			local res = {}
+			for k, v in pairs(temp) do
+				res[tostring(k)] = v
+			end
+			return res
+		end
 	end
 	return nil
 end
@@ -463,8 +496,8 @@ end
 -- lazy-loading / config metadata native has no concept of is stashed under
 -- `data` (sanitized for Vimscript C conversion).
 function M.to_native_spec(p)
-	-- Local plugins are never handed to native vim.pack (nothing to clone).
-	if p.is_local then
+	-- Local plugins and pack.nvim itself are never handed to native vim.pack (nothing to clone).
+	if p.is_local or p.name == "pack.nvim" or (p.url and p.url:match("pack%.nvim")) then
 		return nil
 	end
 	local raw_data = {

@@ -197,21 +197,6 @@ function M.setup_triggers(p)
 		end
 	end
 
-	local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
-	local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
-	for _, file in ipairs(ftdetect_vim) do
-		local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
-		if not ok then
-			vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
-		end
-	end
-	for _, file in ipairs(ftdetect_lua) do
-		local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
-		if not ok then
-			vim.notify("Error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)
-		end
-	end
-
 	if p.event then
 		local events = type(p.event) == "table" and p.event or { p.event }
 		for _, event in ipairs(events) do
@@ -241,13 +226,8 @@ function M.setup_triggers(p)
 			group = group,
 			pattern = fts,
 			once = true,
-			callback = function(args)
+			callback = function()
 				M.load(p.name)
-				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(args.buf) then
-						vim.api.nvim_exec_autocmds("FileType", { buffer = args.buf, modeline = false })
-					end
-				end)
 			end,
 		})
 	end
@@ -318,6 +298,7 @@ end
 -- modname -> plugin lookup, rebuilt only when state.generation changes so the
 -- searcher stays O(1) per require instead of rescanning every plugin each time.
 local mod_cache = { gen = -1, map = {} }
+local in_ftdetect = false
 
 local function resolve_plugin(modname)
 	if mod_cache.gen ~= state.generation then
@@ -335,28 +316,35 @@ local function resolve_plugin(modname)
 			local p = plugins[name]
 			local base = p.main or (name:match("([^/]+)$") or name):gsub("%.nvim$", "")
 			map[name] = map[name] or p
+			map[name:gsub("-", "_")] = map[name:gsub("-", "_")] or p
 			map[base] = map[base] or p
+			map[base:gsub("-", "_")] = map[base:gsub("-", "_")] or p
 			local head = base:match("^([^.]+)")
-			if head then
+			if head and head ~= base then
 				map[head] = map[head] or p
+				map[head:gsub("-", "_")] = map[head:gsub("-", "_")] or p
 			end
 		end
 		mod_cache.map = map
 		mod_cache.gen = state.generation
 	end
 	local map = mod_cache.map
-	-- Exact module name, or the plugin owning the top-level segment
-	-- (require "telescope.builtin" -> plugin with base "telescope").
-	return map[modname] or map[modname:match("^([^.]+)")]
+	local head = modname:match("^([^.]+)")
+	return map[modname] or map[modname:gsub("-", "_")] or (head and map[head]) or (head and map[head:gsub("-", "_")])
 end
 
 function M.init(config)
+	in_ftdetect = true
 	pcall(dofile, ftdetect_cache_path())
+	in_ftdetect = false
 
 	-- Intercept requires for disabled plugins to prevent configuration crashes.
 	-- If a disabled module is required directly (not inside pcall), we return a deep mock table.
 	if not M._searcher_installed then
 		table.insert(package.loaders or package.searchers, 1, function(modname)
+			if in_ftdetect then
+				return nil
+			end
 			local target_p = resolve_plugin(modname)
 
 			if target_p then

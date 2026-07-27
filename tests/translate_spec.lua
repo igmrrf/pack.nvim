@@ -102,4 +102,24 @@ describe("pack.state.to_native_spec", function()
     assert.equals("make", ns.data.build)
     assert.equals(50, ns.data.priority)
   end)
+
+  it("sanitizes mixed array/hash tables into pure dictionaries to prevent C conversion errors", function()
+    state.init({
+      install_path = vim.fn.tempname() .. "-pack-install",
+      plugins = {
+        {
+          "user/foo.nvim",
+          keys = {
+            { "<leader>f", "<cmd>Foo<cr>", desc = "Find file" },
+          },
+          dependencies = {
+            { "user/dep.nvim", lazy = true },
+          },
+        },
+      },
+    })
+    local ns = state.to_native_spec(state.get_plugins()["foo.nvim"])
+    assert.same({ ["1"] = "<leader>f", ["2"] = "<cmd>Foo<cr>", desc = "Find file" }, ns.data.keys[1])
+    assert.same({ ["1"] = "user/dep.nvim", lazy = true }, ns.data.dependencies[1])
+  end)
 end)
