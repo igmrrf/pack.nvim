@@ -496,8 +496,8 @@ end
 -- lazy-loading / config metadata native has no concept of is stashed under
 -- `data` (sanitized for Vimscript C conversion).
 function M.to_native_spec(p)
-	-- Local plugins and pack.nvim itself are never handed to native vim.pack (nothing to clone).
-	if p.is_local or p.name == "pack.nvim" or (p.url and p.url:match("pack%.nvim")) then
+	-- Local plugins (dir=) are never handed to native vim.pack (nothing to clone/fetch).
+	if p.is_local then
 		return nil
 	end
 	local raw_data = {
