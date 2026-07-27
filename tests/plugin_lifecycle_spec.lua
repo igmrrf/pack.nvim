@@ -27,6 +27,27 @@ describe("pack.state auto config uses runtime opts (4.x)", function()
     package.loaded["stubmod"] = nil
     _G.STUB_OPTS = nil
   end)
+
+  it("resolves default main by probing the lua/ dir for a hyphen->underscore module", function()
+    -- Repo basename is hyphenated (neovim-tips) but the module underscores it
+    -- (require("neovim_tips")). A real lua/neovim_tips/init.lua on disk lets the
+    -- probe pick the underscore variant; package.preload stubs the actual load.
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root .. "/lua/neovim_tips", "p")
+    vim.fn.writefile({ "return {}" }, root .. "/lua/neovim_tips/init.lua")
+    package.preload["neovim_tips"] = function()
+      return { setup = function(o) _G.NT_OPTS = o end }
+    end
+
+    state.init({ plugins = { { "saxon1964/neovim-tips", opts = { daily_tip = 0 } } } })
+    local p = state.get_plugins()["neovim-tips"]
+    p.dir = root -- loader sets this to the install path before config runs
+    p.config({ path = root, spec = p }, p.opts)
+
+    assert.same({ daily_tip = 0 }, _G.NT_OPTS)
+    package.preload["neovim_tips"] = nil
+    _G.NT_OPTS = nil
+  end)
 end)
 
 describe("pack.state enabled=false vs invalid spec (4.x)", function()

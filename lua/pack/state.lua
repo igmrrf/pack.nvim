@@ -15,10 +15,35 @@ function M.native_opt_dir()
 	return vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
 end
 
--- Derive the require() module name from a plugin name when `main` isn't set,
--- following the common "<module>.nvim" repo naming convention.
-local function default_main(name)
-	return name:match("^(.+)%.nvim$") or name
+-- Derive the require() module name from a plugin name when `main` isn't set.
+-- Strips a trailing ".nvim", then -- when the install dir is known -- probes the
+-- plugin's lua/ tree to pick the module that actually exists on disk. Repos whose
+-- module underscores a hyphenated basename (neovim-tips -> require("neovim_tips"))
+-- resolve correctly instead of failing on require("neovim-tips"). Falls back to
+-- the (hyphenated) base name so behavior is unchanged when nothing matches.
+local function default_main(name, plugin_dir)
+	local base = name:match("^(.+)%.nvim$") or name
+
+	-- Most-specific first: the literal base, then the hyphen->underscore variant.
+	local candidates = { base }
+	local underscored = base:gsub("%-", "_")
+	if underscored ~= base then
+		candidates[#candidates + 1] = underscored
+	end
+
+	if plugin_dir and plugin_dir ~= "" then
+		local lua_dir = vim.fs.joinpath(plugin_dir, "lua")
+		for _, cand in ipairs(candidates) do
+			-- module dir (lua/<cand>/init.lua) or single file (lua/<cand>.lua)
+			if vim.uv.fs_stat(vim.fs.joinpath(lua_dir, cand, "init.lua"))
+				or vim.uv.fs_stat(vim.fs.joinpath(lua_dir, cand .. ".lua"))
+			then
+				return cand
+			end
+		end
+	end
+
+	return base
 end
 
 -- Single source of truth for a spec's registry key. Used by both normalize()
@@ -98,10 +123,22 @@ local function normalize(plugin, config)
 
 	local config_fn = plugin.config
 	if not config_fn and plugin.opts then
-		local main = plugin.main or default_main(name)
-		-- Use the opts passed at load time (loader hands over p.opts) so a runtime
-		-- mutation is honored, falling back to the spec's opts if called bare.
+		-- Resolve `main` at load time (inside the closure), not here: on first
+		-- install the clone doesn't exist yet at normalize time, so a disk probe
+		-- would find nothing. By the time config runs the plugin is on disk and
+		-- loader has recorded its real path in the registry.
 		config_fn = function(_, opts_arg)
+			local main = plugin.main
+			if not main then
+				local rec = M.plugins[name]
+				local dir = rec and rec.dir
+				if not dir or dir == "" then
+					dir = is_local and full_url or vim.fs.joinpath(M.native_opt_dir(), name)
+				end
+				main = default_main(name, dir)
+			end
+			-- Use the opts passed at load time (loader hands over p.opts) so a runtime
+			-- mutation is honored, falling back to the spec's opts if called bare.
 			require(main).setup(opts_arg ~= nil and opts_arg or plugin.opts)
 		end
 	end
