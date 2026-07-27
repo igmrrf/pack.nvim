@@ -97,6 +97,41 @@ describe("pack.loader triggers", function()
     assert.is_nil(commands["CollisionCmd"])
   end)
 
+  it("restores a lazy plugin's real key mapping after it loads via a non-key trigger (event/cmd/dependency)", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        {
+          "user/keyload",
+          dir = dir,
+          lazy = true,
+          event = "VimResized",
+          keys = { { "<F19>", function() _G.KEYLOAD_FIRED = true end } },
+        },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["keyload"]
+    -- Wires the event autocmd AND the <F19> lazy-load placeholder keymap.
+    loader.setup_triggers(p)
+
+    -- Something other than the key itself (the event, a :cmd, a dependency
+    -- force-load, require()) loads the plugin before <F19> is ever pressed.
+    loader.load("keyload")
+
+    local map = vim.fn.maparg("<F19>", "n", false, true)
+    assert.is_not_nil(
+      map.callback,
+      "the plugin's real key mapping must be (re)bound once it has loaded, however it loaded"
+    )
+    map.callback()
+    assert.is_true(_G.KEYLOAD_FIRED)
+    _G.KEYLOAD_FIRED = nil
+    pcall(vim.keymap.del, "n", "<F19>")
+  end)
+
   it("prevents infinite recursion when a plugin require()s itself during loading", function()
     local state = require("pack.state")
     local dir = vim.fn.tempname()

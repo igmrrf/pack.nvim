@@ -82,15 +82,18 @@ local function normalize_key_entries(raw)
 	return entries
 end
 
--- Entries with an explicit rhs are mapped directly (mirrors pack.map_keys).
--- Bare-lhs entries only make sense on a lazy plugin: pressing the key loads
--- the plugin then replays the keypress so the plugin's own mapping fires.
+-- Entries with an explicit rhs are mapped directly (mirrors pack.map_keys) once
+-- the plugin is loaded. Before that (still lazy), each entry gets a
+-- placeholder that loads the plugin on first press then replays the keypress
+-- so the plugin's own (or the entry's) rhs fires -- M.load calls this again
+-- once the plugin is actually loaded, however it got loaded, to rebind every
+-- entry for real.
 local function setup_keys(p)
 	for _, entry in ipairs(normalize_key_entries(p.keys)) do
 		local lhs = entry.lhs
 		if not lhs then
 			vim.notify("pack: '" .. p.name .. "' has a keys entry with no lhs - skipping", vim.log.levels.WARN)
-		elseif not p.lazy then
+		elseif p.status == "loaded" then
 			if entry.rhs == nil then
 				vim.notify(
 					"pack: '"
@@ -455,12 +458,8 @@ function M.flush_pending()
 
 	for _, p in ipairs(eager) do
 		-- cond was already evaluated above; don't re-run it (side effects).
+		-- M.load itself (re)binds `keys` once the plugin is loaded.
 		M.load(p.name, { cond_checked = true })
-		-- Bind directly-mapped (rhs-bearing) keys for eager plugins; lazy plugins
-		-- handle their keys via triggers instead.
-		if p.keys and p.status == "loaded" then
-			setup_keys(p)
-		end
 	end
 
 	pending = {}
@@ -538,6 +537,14 @@ function M.load(name, opts)
 			end
 		else
 			p.load_time = elapsed
+		end
+		-- Rebind every `keys` entry for real now that the plugin is loaded --
+		-- regardless of what caused the load (its own key, an event/cmd trigger,
+		-- a dependency force-load, :Pack load, require()). remove_triggers above
+		-- already tore down the lazy placeholders; without this they'd just stay
+		-- gone since only the specific key that was pressed (if any) rebinds itself.
+		if p.keys then
+			setup_keys(p)
 		end
 	else
 		-- packadd/local-load failed: record it so triggers stop re-attempting.
