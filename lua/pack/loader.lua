@@ -393,15 +393,15 @@ local pending = {}
 -- We only record the plugin + its resolved on-disk path; actual loading happens
 -- in flush_pending() after add() returns, so we control order and laziness.
 function M.load_fn(data)
-	local name = data.spec.name
-	local p = state.get_plugins()[name]
+	local name = data.spec and data.spec.name
+	local p = state.find_plugin(name, data.spec and data.spec.src)
 	if p then
 		p.dir = data.path
 		if p.status ~= "loaded" then
 			p.status = "installed"
 		end
 	end
-	table.insert(pending, { name = name, path = data.path })
+	table.insert(pending, { name = p and p.name or name, path = data.path })
 end
 
 -- Enqueue local (`dir=`) plugins for loading. They never pass through native's

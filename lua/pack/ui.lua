@@ -8,6 +8,7 @@ local config_ref = nil
 local plugin_map = {}
 local ns_id = vim.api.nvim_create_namespace("pack")
 local expanded_plugins = {}
+local initial_focus = false
 
 local selected_plugins = {}
 
@@ -100,13 +101,13 @@ local FOOTER_BY_TAB = {
 
 function M.cycle_tab()
 	current_tab = next_tab(current_tab)
-	M.update()
+	M.update({ jump_to_first = true })
 end
 
 function M.set_tab(index)
 	if TAB_ORDER[index] then
 		current_tab = TAB_ORDER[index]
-		M.update()
+		M.update({ jump_to_first = true })
 	end
 end
 
@@ -114,7 +115,7 @@ function M.filter()
 	vim.ui.input({ prompt = "Filter Plugins: ", default = search_term }, function(input)
 		if input ~= nil then
 			search_term = input:lower()
-			M.update()
+			M.update({ jump_to_first = true })
 		end
 	end)
 end
@@ -267,7 +268,8 @@ function M.clean()
 	local removed = 0
 	for _, entry in ipairs(managed) do
 		local name = entry.spec and entry.spec.name
-		if name and not (configured[name] and configured[name].managed) then
+		local p = state.find_plugin(name, entry.spec and entry.spec.src)
+		if name and not (p and p.managed) then
 			pcall(function()
 				vim.pack.del({ name })
 			end)
@@ -629,6 +631,7 @@ function M.open(config)
 	vim.keymap.set("n", "2", "<Cmd>lua require('pack.ui').set_tab(2)<CR>", opts)
 	vim.keymap.set("n", "3", "<Cmd>lua require('pack.ui').set_tab(3)<CR>", opts)
 
+	initial_focus = true
 	M.update()
 	require("pack.async").check_all_outdated()
 end
@@ -983,7 +986,8 @@ local function render_disabled_tab(lines, highlights)
 	end
 end
 
-function M.update()
+function M.update(opts)
+	opts = opts or {}
 	if not buf_id or not vim.api.nvim_buf_is_valid(buf_id) then
 		return
 	end
@@ -1103,10 +1107,8 @@ function M.update()
 			if found_line then
 				cursor[1] = found_line
 			end
-		end
-
-		-- If cursor is on a non-plugin line (header/tab bar), jump to first plugin line
-		if not plugin_map[cursor[1]] then
+		elseif initial_focus or opts.jump_to_first then
+			-- On initial open or tab/filter change, jump to first plugin line
 			for i = 1, #lines do
 				if plugin_map[i] then
 					cursor[1] = i
@@ -1114,6 +1116,7 @@ function M.update()
 				end
 			end
 		end
+		initial_focus = false
 
 		if cursor[1] > #lines then
 			cursor[1] = #lines

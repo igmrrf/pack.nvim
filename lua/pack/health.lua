@@ -77,9 +77,11 @@ function M.check()
 		local ok_get, managed = pcall(vim.pack.get)
 		if ok_get and type(managed) == "table" then
 			local orphans = {}
+			local state = require("pack.state")
 			for _, entry in ipairs(managed) do
 				local name = entry.spec and entry.spec.name
-				if name and not plugins[name] then
+				local p = state.find_plugin(name, entry.spec and entry.spec.src)
+				if name and not p then
 					orphans[#orphans + 1] = name
 				end
 			end

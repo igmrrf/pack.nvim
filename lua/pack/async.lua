@@ -509,7 +509,7 @@ function M.setup_build_hooks()
 				return
 			end
 			local name = d.spec and d.spec.name
-			local p = name and state.get_plugins()[name]
+			local p = state.find_plugin(name, d.spec and d.spec.src)
 			if not p then
 				return
 			end

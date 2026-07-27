@@ -297,6 +297,23 @@ end
 -- Refresh installed-status / on-disk path / recorded revision from what native
 -- vim.pack actually has. load_fn already reconciles on add; this is for the
 -- dashboard to reflect installs/updates that happened via native afterwards.
+function M.find_plugin(name, src)
+	if not name and not src then
+		return nil
+	end
+	if name and M.plugins[name] then
+		return M.plugins[name]
+	end
+	for _, p in pairs(M.plugins) do
+		if (src and p.url and src:lower() == p.url:lower())
+			or (name and p.name and (p.name .. ".nvim" == name or name .. ".nvim" == p.name))
+		then
+			return p
+		end
+	end
+	return nil
+end
+
 function M.reconcile_from_native(native_pack)
 	if not (native_pack and native_pack.get) then
 		return
@@ -320,7 +337,7 @@ function M.reconcile_from_native(native_pack)
 	for _, entry in ipairs(list) do
 		local name = entry.spec and entry.spec.name
 		if name then
-			local p = M.plugins[name]
+			local p = M.find_plugin(name, entry.spec and entry.spec.src)
 			if p then
 				-- Managed or already-adopted record: refresh from native, keep `managed`.
 				p.dir = entry.path or p.dir

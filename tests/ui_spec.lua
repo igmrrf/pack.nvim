@@ -417,6 +417,27 @@ describe("pack.ui", function()
       assert.is_falsy(text:match("foo%.nvim%s+%(native%)")) -- managed plugin has no tag
     end)
 
+    it("matches native plugin when registered name differs from native repo name (e.g. gitsigns vs gitsigns.nvim)", function()
+      local config = config_with({ { "lewis6991/gitsigns.nvim", name = "gitsigns" } })
+      state.init(config)
+      state.reconcile_from_native({
+        get = function()
+          return {
+            {
+              path = "/some/path/gitsigns.nvim",
+              rev = "abc1234",
+              spec = { name = "gitsigns.nvim", src = "https://github.com/lewis6991/gitsigns.nvim" },
+            },
+          }
+        end,
+      })
+      local plugins = state.get_plugins()
+      assert.is_not_nil(plugins["gitsigns"])
+      assert.is_true(plugins["gitsigns"].managed)
+      assert.equals("/some/path/gitsigns.nvim", plugins["gitsigns"].dir)
+      assert.is_nil(plugins["gitsigns.nvim"]) -- no duplicate unmanaged adopted entry created
+    end)
+
     it("toggle_disabled refuses an adopted plugin", function()
       local config = config_with({})
       state.init(config)
@@ -595,5 +616,33 @@ describe("pack.ui", function()
       local first_plugin_line = find_line(buf, "foo%.nvim")
       assert.equals(first_plugin_line, cursor[1])
     end)
+
+    it("preserves cursor position on non-plugin lines or bottom during periodic updates", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      state.update_status("bar.nvim", "loaded")
+      ui.open(config)
+
+      -- Move cursor to line 1 (header line, non-plugin)
+      vim.api.nvim_win_set_cursor(0, { 1, 0 })
+      ui.update()
+      local cursor = vim.api.nvim_win_get_cursor(0)
+      assert.equals(1, cursor[1])
+
+      -- Move cursor to line 2 (blank/spinner line, non-plugin)
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+      ui.update()
+      cursor = vim.api.nvim_win_get_cursor(0)
+      assert.equals(2, cursor[1])
+
+      -- Move cursor to bottom line
+      local line_count = vim.api.nvim_buf_line_count(0)
+      vim.api.nvim_win_set_cursor(0, { line_count, 0 })
+      ui.update()
+      cursor = vim.api.nvim_win_get_cursor(0)
+      assert.equals(line_count, cursor[1])
+    end)
   end)
 end)
+

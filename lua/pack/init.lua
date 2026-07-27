@@ -170,7 +170,7 @@ function M._install_and_load(native_specs, confirm)
 	if M.native_pack and M.native_pack.add and #native_specs > 0 then
 		local has_uninstalled = false
 		for _, spec in ipairs(native_specs) do
-			local p = state.get_plugins()[spec.name]
+			local p = state.find_plugin(spec.name, spec.src)
 			if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
 				has_uninstalled = true
 				break
