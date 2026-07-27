@@ -119,6 +119,35 @@ describe("pack.ui", function()
       end
       assert.is_true(found)
     end)
+
+    it("toggle_details does not error for a plugin with a multi-entry keys table", function()
+      -- vim.inspect() on a keys table with several entries (some with function
+      -- rhs) pretty-prints across multiple lines; that must never leak into a
+      -- single nvim_buf_set_lines() entry (each entry must be newline-free).
+      local config = config_with({
+        {
+          "user/keysplug.nvim",
+          lazy = true,
+          keys = {
+            { "<leader>a", function() end, desc = "a" },
+            { "<leader>b", function() end, desc = "b" },
+            { "<leader>c", ":SomeCmd<CR>", desc = "c" },
+          },
+        },
+      })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "keysplug%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      local ok, err = pcall(ui.toggle_details)
+      assert.is_true(ok, "toggle_details must not error: " .. tostring(err))
+
+      for _, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+        assert.is_nil(l:find("\n"), "a buffer line must never contain an embedded newline")
+      end
+    end)
   end)
 
   describe("tabs", function()

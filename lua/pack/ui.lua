@@ -336,19 +336,26 @@ function M.toggle_details()
 	M.update()
 end
 
+-- Buffer lines fed to nvim_buf_set_lines() must never contain an embedded
+-- newline; vim.inspect() pretty-prints tables across multiple lines by
+-- default, so every inspect used in a single detail line must force one line.
+local function inspect_oneline(value)
+	return vim.inspect(value, { newline = " ", indent = "" })
+end
+
 local function trigger_summary(p)
 	local parts = {}
 	if p.cmd then
-		table.insert(parts, "cmd=" .. vim.inspect(p.cmd))
+		table.insert(parts, "cmd=" .. inspect_oneline(p.cmd))
 	end
 	if p.event then
-		table.insert(parts, "event=" .. vim.inspect(p.event))
+		table.insert(parts, "event=" .. inspect_oneline(p.event))
 	end
 	if p.ft then
-		table.insert(parts, "ft=" .. vim.inspect(p.ft))
+		table.insert(parts, "ft=" .. inspect_oneline(p.ft))
 	end
 	if p.keys then
-		table.insert(parts, "keys=" .. vim.inspect(p.keys))
+		table.insert(parts, "keys=" .. inspect_oneline(p.keys))
 	end
 	if #parts == 0 then
 		return "none"
@@ -386,7 +393,7 @@ local function quick_detail_lines(p)
 		table.insert(lines, "deps:     " .. table.concat(deps, ", "))
 	end
 	if p.build then
-		table.insert(lines, "build:    " .. vim.inspect(p.build))
+		table.insert(lines, "build:    " .. inspect_oneline(p.build))
 	end
 	return lines
 end
