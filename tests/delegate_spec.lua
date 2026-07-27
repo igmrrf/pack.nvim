@@ -185,7 +185,7 @@ describe("pack.init native delegation", function()
     assert.equals("installed", p.status)
   end)
 
-  it("installs the vim.pack.add wrapper and reconciles native plugins in setup", function()
+  it("installs the vim.pack.add wrapper in setup without blocking on native reconcile", function()
     local pack = require("pack")
     -- Note: no local finally/restore here -- the describe-level after_each
     -- (above) unconditionally restores vim.pack = orig_vim_pack after every
@@ -205,7 +205,11 @@ describe("pack.init native delegation", function()
 
     -- Wrapper is installed (not the raw native add).
     assert.are_not.equal(fake_native.add, vim.pack.add)
-    -- Native-only plugin was adopted during setup.
+    -- Non-blocking setup does not scan disk for adopted plugins on startup...
+    assert.is_nil(require("pack.state").get_plugins()["adopted.nvim"])
+
+    -- ...reconciliation happens when requested (e.g. by ui.open)
+    state.reconcile_from_native(pack.native_pack)
     local a = require("pack.state").get_plugins()["adopted.nvim"]
     assert.is_not_nil(a)
     assert.is_false(a.managed)

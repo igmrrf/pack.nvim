@@ -33,6 +33,32 @@ describe("pack import spec normalization (1.4)", function()
     assert.equals(2, #out)
     assert.same({}, out[1].opts)
   end)
+
+  it("imports plugins from user config directory when it exists", function()
+    local config_dir = vim.fn.tempname() .. "-nvim-config"
+    local imp_dir = config_dir .. "/lua/test_plugins"
+    vim.fn.mkdir(imp_dir, "p")
+    vim.fn.writefile({ "return { 'user/from_config.nvim' }" }, imp_dir .. "/spec.lua")
+
+    local orig_stdpath = vim.fn.stdpath
+    vim.fn.stdpath = function(what)
+      if what == "config" then
+        return config_dir
+      end
+      return orig_stdpath(what)
+    end
+    vim.opt.runtimepath:prepend(config_dir)
+
+    local out = pack._load_plugins({ import = "test_plugins" })
+
+    vim.fn.stdpath = orig_stdpath
+    package.loaded["test_plugins.spec"] = nil
+    vim.opt.runtimepath:remove(config_dir)
+    vim.fn.delete(config_dir, "rf")
+
+    assert.equals(1, #out)
+    assert.equals("user/from_config.nvim", out[1][1])
+  end)
 end)
 
 describe("pack.state local plugin dir= (1.5)", function()

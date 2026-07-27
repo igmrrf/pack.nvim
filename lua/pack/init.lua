@@ -82,7 +82,17 @@ local function load_plugins(spec)
 
 	local plugins = {}
 	local path = spec:gsub("%.", "/")
-	local files = vim.api.nvim_get_runtime_file("lua/" .. path .. "/**/*.lua", true)
+	local files = {}
+
+	local user_config_dir = vim.fn.stdpath("config")
+	local user_path = user_config_dir .. "/lua/" .. path
+	if vim.fn.isdirectory(user_path) == 1 then
+		files = vim.fn.glob(user_path .. "/**/*.lua", false, true)
+	end
+
+	if #files == 0 then
+		files = vim.api.nvim_get_runtime_file("lua/" .. path .. "/**/*.lua", true)
+	end
 
 	if #files == 0 then
 		local ok, mod = pcall(require, spec)
@@ -333,10 +343,6 @@ function M.setup(opts)
 
 	-- Install (native) + load (ours) every configured, non-disabled plugin.
 	M._install_and_load(collect_native_specs(state.get_plugins()), false)
-
-	-- Adopt anything native already has on disk that was never declared to us
-	-- (bootstrap line, pre-setup calls). Runs now so state is correct immediately.
-	state.reconcile_from_native(M.native_pack)
 
 	-- create commands
 	vim.api.nvim_create_user_command("Pack", function(opts)

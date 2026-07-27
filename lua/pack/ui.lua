@@ -796,15 +796,12 @@ local function render_all_tab(lines, highlights)
 				})
 				col_offset = col_offset + #sel_prefix
 
-				table.insert(
-					highlights,
-					{
-						line = #lines - 1,
-						col_start = col_offset,
-						col_end = col_offset + #expand_icon + 1,
-						hl = "Comment",
-					}
-				)
+				table.insert(highlights, {
+					line = #lines - 1,
+					col_start = col_offset,
+					col_end = col_offset + #expand_icon + 1,
+					hl = "Comment",
+				})
 				local icon_start = col_offset + #expand_icon + 1
 				local icon_end = icon_start + #icon
 				table.insert(
@@ -892,15 +889,12 @@ local function render_outdated_tab(lines, highlights)
 			{ line = #lines - 1, col_start = col_offset, col_end = col_offset + #expand_icon + 1, hl = "Comment" }
 		)
 		local icon_start = col_offset + #expand_icon + 1
-		table.insert(
-			highlights,
-			{
-				line = #lines - 1,
-				col_start = icon_start,
-				col_end = icon_start + #config_ref.ui.icons.sync,
-				hl = "DiagnosticWarn",
-			}
-		)
+		table.insert(highlights, {
+			line = #lines - 1,
+			col_start = icon_start,
+			col_end = icon_start + #config_ref.ui.icons.sync,
+			hl = "DiagnosticWarn",
+		})
 
 		if expanded_plugins[p.name] then
 			local branch_suffix = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""

@@ -30,17 +30,20 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nv
 pack.nvim leverages Neovim 0.12's native `vim.pack` for bootstrapping. Add this snippet to the top of your `init.lua`:
 
 ```lua
+-- 1. Enable Neovim's built-in bytecode cache (must be on Line 1 for full caching benefits)
+vim.loader.enable()
+
 vim.g.mapleader = " "
 vim.g.maplocalleader = " "
 
--- 1. Bootstrap pack.nvim using Neovim's native vim.pack
+-- 2. Bootstrap pack.nvim using Neovim's native vim.pack
 vim.pack.add({ { src = "https://github.com/igmrrf/pack.nvim", branch = "main" } })
 vim.cmd.packadd("pack.nvim")
 
--- 2. Initialize pack.nvim with options and plugin specs
+-- 3. Initialize pack.nvim with options and plugin specs
 require("pack").setup({
   performance = {
-    vim_loader = true, -- Enables Neovim's built-in bytecode cache (vim.loader.enable())
+    vim_loader = true, -- Fallback to ensure vim.loader.enable() is called if omitted
   },
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
