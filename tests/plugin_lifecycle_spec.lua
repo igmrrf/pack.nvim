@@ -186,4 +186,22 @@ describe("pack.init _install_and_load chunking and pcall guard", function()
     assert.is_true(ok, "_install_and_load must not raise an unhandled exception")
     assert.same({ 10, 10, 5 }, added_chunks, "must chunk 25 specs into batches of 10, 10, 5")
   end)
+
+  it("flips a not-yet-present plugin to 'installing' before the async native add resolves", function()
+    local pack = require("pack")
+    state.init({ plugins = { { "u/instplug" } } })
+    local p = state.get_plugins()["instplug"]
+    assert.equals("missing", p.status, "an uninstalled plugin starts in 'missing'")
+
+    local orig_native = pack.native_pack
+    -- Mock native add as a no-op: it never invokes load_fn, so the only status
+    -- transition under test is the pre-add flip to "installing".
+    pack.native_pack = { add = function() end }
+
+    local ok = pcall(pack._install_and_load, { { name = p.name, src = p.url } }, false)
+
+    pack.native_pack = orig_native
+    assert.is_true(ok)
+    assert.equals("installing", state.get_plugins()["instplug"].status)
+  end)
 end)

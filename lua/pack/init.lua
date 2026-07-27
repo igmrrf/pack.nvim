@@ -173,7 +173,11 @@ function M._install_and_load(native_specs, confirm)
 			local p = state.find_plugin(spec.name, spec.src)
 			if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
 				has_uninstalled = true
-				break
+				-- Native add runs async; flip the not-yet-present plugin to
+				-- "installing" so the dashboard shows the in-flight state instead of
+				-- leaving it stuck in "missing" ("Not Installed"). load_fn /
+				-- PackChanged(install) move it to installed/loaded when the clone lands.
+				state.update_status(p.name, "installing")
 			end
 		end
 
