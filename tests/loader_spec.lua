@@ -97,6 +97,16 @@ describe("pack.loader triggers", function()
     assert.is_nil(commands["CollisionCmd"])
   end)
 
+  it("does not pass non-keymap fields (e.g. a lazy.nvim-style per-key `ft`) through to vim.keymap.set", function()
+    local p = make_plugin({ keys = { { "<F20>", ":Noop<CR>", ft = "markdown", desc = "noop" } } })
+    local ok, err = pcall(loader.setup_triggers, p)
+    assert.is_true(ok, "a keys entry with a non-keymap field must not error: " .. tostring(err))
+
+    local map = vim.fn.maparg("<F20>", "n", false, true)
+    assert.equals("noop", map.desc)
+    loader.remove_triggers(p)
+  end)
+
   it("restores a lazy plugin's real key mapping after it loads via a non-key trigger (event/cmd/dependency)", function()
     local state = require("pack.state")
     local dir = vim.fn.tempname()

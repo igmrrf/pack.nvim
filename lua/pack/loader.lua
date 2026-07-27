@@ -60,6 +60,25 @@ local function load_local(p)
 	return true
 end
 
+-- Fields vim.keymap.set's `opts` actually accepts (see :h vim.keymap.set() /
+-- :map-arguments). Everything else on a keys entry is pack.nvim/lazy.nvim
+-- spec metadata (e.g. a per-key `ft`, `cond`) that must never reach it --
+-- nvim_set_keymap() errors ("invalid key: ...") on an unrecognized field.
+local KEYMAP_OPTS = {
+	buffer = true,
+	buf = true,
+	desc = true,
+	expr = true,
+	noremap = true,
+	nowait = true,
+	remap = true,
+	replace_keycodes = true,
+	script = true,
+	silent = true,
+	unique = true,
+	callback = true,
+}
+
 -- Accepts: "<lhs>" | { "<lhs>", mode=... } | { "<lhs>", rhs, mode=..., desc=..., ... }
 local function normalize_key_entries(raw)
 	local entries = {}
@@ -72,7 +91,7 @@ local function normalize_key_entries(raw)
 			modes = type(modes) == "table" and modes or { modes }
 			local opts = {}
 			for key, value in pairs(k) do
-				if type(key) == "string" and key ~= "mode" then
+				if KEYMAP_OPTS[key] then
 					opts[key] = value
 				end
 			end
