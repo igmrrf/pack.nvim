@@ -152,11 +152,16 @@ describe("pack.init native delegation", function()
     assert.equals("re.nvim", fake.added[#fake.added].name)
   end)
 
-  it(":Pack sync delegates to native update-all", function()
+  it(":Pack sync updates managed plugins with force=true (no native confirm UI)", function()
+    -- Regression: sync used to call native update with no `force`, which pops
+    -- native vim.pack's own confirmation buffer. Sync must be non-interactive --
+    -- the dashboard IS the confirmation -- so it passes force=true (and targets
+    -- the managed plugins explicitly, driving the dashboard's own progress).
     do_setup({ "user/foo.nvim" })
     vim.cmd("Pack sync")
-    assert.is_true(#fake.updated >= 1)
-    assert.is_nil(fake.updated[#fake.updated].names)
+    local last = fake.updated[#fake.updated]
+    assert.same({ "foo.nvim" }, last.names)
+    assert.is_true(last.opts.force)
   end)
 
   it(":Pack restore delegates to native lockfile update", function()

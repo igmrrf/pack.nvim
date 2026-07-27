@@ -338,6 +338,35 @@ describe("pack.async.run_build_hook", function()
     assert.equals("error", p.status, "failing build hook must update status to error")
   end)
 
+  it("does not clobber a status set mid-build back to the pre-build placeholder", function()
+    -- Mirrors a fresh install: PackChanged(install) fires (and calls run_build_hook)
+    -- BEFORE native's load_fn callback flips status away from "missing". If the
+    -- build hook's own load_fn/M.load race finishes first and sets "loaded",
+    -- run_build_hook must not stomp that back down to "missing" on completion.
+    local p = { name = "fixture.nvim", dir = vim.fn.tempname(), log = {} }
+    p.status = "missing"
+    p.build = function()
+      p.status = "loaded"
+    end
+    local done = false
+    async.run_build_hook(p, function() done = true end)
+    assert.is_true(vim.wait(500, function() return done end, 10), "build did not finish")
+    assert.equals("loaded", p.status, "run_build_hook must not revert status to the pre-build placeholder")
+  end)
+
+  it("keeps a loaded plugin loaded after a rebuild (e.g. :Pack build)", function()
+    -- Rebuilding an already-loaded plugin (no update flow to restore status) must
+    -- not downgrade it to "installed". The build hook runs while status shows
+    -- "building"; on completion it returns to the pre-build "loaded".
+    local p = { name = "fixture.nvim", dir = vim.fn.tempname(), log = {} }
+    p.status = "loaded"
+    p.build = function() end -- does not touch status
+    local done = false
+    async.run_build_hook(p, function() done = true end)
+    assert.is_true(vim.wait(500, function() return done end, 10), "build did not finish")
+    assert.equals("loaded", p.status, "rebuild of a loaded plugin must stay loaded, not drop to installed")
+  end)
+
   it("runs a list of build hooks in sequence and calls done exactly once", function()
     local order = {}
     local p = fixture_plugin({

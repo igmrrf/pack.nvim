@@ -354,7 +354,31 @@ function M.setup(opts)
 		local target = args_list[2]
 
 		if subcmd == "sync" then
-			native_call("sync", M.native_pack.update)
+			-- Sync = install anything missing, then pull updates for everything
+			-- installed. Crucially it runs NON-interactively: the old path called
+			-- native update with no `force`, which pops native vim.pack's own
+			-- confirmation buffer on top of our dashboard. Route installed plugins
+			-- through the async updater (force=true, no native UI, drives the
+			-- dashboard's own spinner/status) and hand missing ones to the installer.
+			local to_install, to_update = {}, {}
+			for name, p in pairs(state.get_plugins()) do
+				if not p.disabled and p.managed ~= false and not p.is_local then
+					if p.status == "missing" then
+						local ns = state.to_native_spec(p)
+						if ns then
+							to_install[#to_install + 1] = ns
+						end
+					else
+						to_update[#to_update + 1] = name
+					end
+				end
+			end
+			if #to_install > 0 then
+				M._install_and_load(to_install, false)
+			end
+			if #to_update > 0 then
+				require("pack.async").update_plugins(to_update)
+			end
 		elseif subcmd == "update" then
 			if target then
 				if state.get_plugins()[target] then

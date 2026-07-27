@@ -678,14 +678,94 @@ function M.show_profile()
 	vim.bo[buf].filetype = "pack_profile"
 end
 
+-- The currently-open log popup, so async install/update/build output can stream
+-- into it live: { name = plugin, buf =, win =, last = #lines last painted }.
+local log_view = nil
+
+local function plugin_is_busy(p)
+	return p
+		and (
+			p.status == "installing"
+			or p.status == "updating"
+			or p.status == "building"
+			or p.checking == true
+		)
+end
+
+-- Repaint the open log popup from its plugin's current log. Cheap no-op unless
+-- new lines have arrived. Autoscrolls to the newest line so a running build
+-- reads like a live tail. Safe to call from a timer or an async callback.
+function M.update_log()
+	local v = log_view
+	if not v then
+		return
+	end
+	if not (vim.api.nvim_buf_is_valid(v.buf) and vim.api.nvim_win_is_valid(v.win)) then
+		log_view = nil
+		return
+	end
+	local p = state.get_plugins()[v.name]
+	local log = (p and p.log) or {}
+	-- Repaint when the line count grew OR when the log table itself was swapped
+	-- (a fresh reinstall can replace it with a same-length table -- a bare
+	-- `#log == v.last` guard would leave stale content on screen).
+	if #log == v.last and log == v.log_ref then
+		return
+	end
+
+	-- Only tail to the bottom if the user was already parked there. If they
+	-- scrolled up to read earlier output, leave their cursor put -- otherwise
+	-- every async repaint yanks them back down mid-read.
+	local at_bottom = true
+	local ok, cur = pcall(vim.api.nvim_win_get_cursor, v.win)
+	if ok then
+		at_bottom = cur[1] >= v.last
+	end
+
+	v.last = #log
+	v.log_ref = log
+	vim.bo[v.buf].modifiable = true
+	pcall(vim.api.nvim_buf_set_lines, v.buf, 0, -1, false, log)
+	vim.bo[v.buf].modifiable = false
+	if at_bottom then
+		pcall(vim.api.nvim_win_set_cursor, v.win, { math.max(1, #log), 0 })
+	end
+end
+
 function M.show_log()
 	local p = plugin_at_cursor()
 	if not p or not p.log or #p.log == 0 then
 		vim.notify("No logs available for this item.", vim.log.levels.INFO)
 		return
 	end
-	local buf = open_popup(p.log, { wrap = true })
+	local buf, win = open_popup(p.log, { wrap = true })
 	vim.bo[buf].filetype = "pack_log"
+	-- Start parked at the newest line so live-follow tails from the outset; the
+	-- at-bottom check in update_log then keeps tailing until the user scrolls up.
+	pcall(vim.api.nvim_win_set_cursor, win, { math.max(1, #p.log), 0 })
+	log_view = { name = p.name, buf = buf, win = win, last = #p.log, log_ref = p.log }
+
+	-- Live-follow while the plugin is mid install/update/build: a repeating timer
+	-- tails new log lines into the popup, then self-stops when the work finishes
+	-- or the popup is closed. When nothing is in flight there's nothing to stream,
+	-- so skip the timer entirely and leave a static snapshot.
+	if not plugin_is_busy(p) then
+		return buf, win
+	end
+	local timer
+	timer = vim.fn.timer_start(120, function()
+		if not (vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win)) then
+			log_view = nil
+			pcall(vim.fn.timer_stop, timer)
+			return
+		end
+		M.update_log()
+		if not plugin_is_busy(state.get_plugins()[p.name]) then
+			M.update_log() -- final flush of any last lines
+			pcall(vim.fn.timer_stop, timer)
+		end
+	end, { ["repeat"] = -1 })
+	return buf, win
 end
 
 local function add_plugin_details(p, lines, highlights, indent)
@@ -1101,8 +1181,13 @@ function M.update(opts)
 	end
 
 	if cursor and win_id and vim.api.nvim_win_is_valid(win_id) then
-		-- Attempt to retain cursor position on the exact plugin line
-		if prev_plugin_name then
+		-- Chase the previously-focused plugin ONLY on incidental repaints (async
+		-- status updates), so the cursor stays on the plugin it was on. An explicit
+		-- tab/filter switch (or initial open) sets jump_to_first/initial_focus and
+		-- must fall through to the first-plugin jump below instead -- otherwise a
+		-- plugin that also appears further down the target tab would yank the cursor
+		-- tens of lines down on a tab switch.
+		if prev_plugin_name and not (initial_focus or opts.jump_to_first) then
 			local found_line = nil
 			for i = 1, #lines do
 				local p = plugin_map[i]
@@ -1133,6 +1218,11 @@ function M.update(opts)
 		end
 		pcall(vim.api.nvim_win_set_cursor, win_id, cursor)
 	end
+
+	-- Every async status batch (install/update/build) repaints the dashboard via
+	-- ui_update; piggyback on it to stream fresh output into an open log popup so
+	-- logs update as work happens, not only on the follow timer's tick.
+	M.update_log()
 end
 
 return M

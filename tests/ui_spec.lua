@@ -207,6 +207,57 @@ describe("pack.ui", function()
       local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
       assert.is_true(text:match("foo%.nvim") ~= nil)
     end)
+
+    it("switching tabs jumps to the first plugin, not the previously-focused one", function()
+      -- Regression: switching tabs preserved the cursor's plugin if that plugin
+      -- also appeared in the target tab (further down), so e.g. Outdated -> All
+      -- dumped the cursor tens of lines down instead of at the top. A tab switch
+      -- must always land on the first plugin of the new tab.
+      local config = config_with({ "user/aaa.nvim", "user/mmm.nvim", "user/zzz.nvim" })
+      state.init(config)
+      state.set_behind("zzz.nvim", 2) -- only zzz is outdated
+      ui.open(config)
+
+      ui.cycle_tab() -- all -> outdated (only zzz.nvim shown)
+      local zline = find_line(0, "zzz%.nvim")
+      vim.api.nvim_win_set_cursor(0, { zline, 0 })
+
+      ui.set_tab(1) -- back to All: must jump to first plugin, not chase zzz
+
+      local row = vim.api.nvim_win_get_cursor(0)[1]
+      local cur = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1] or ""
+      assert.is_true(cur:match("aaa%.nvim") ~= nil, "cursor should be on the first plugin, got: " .. cur)
+      assert.is_nil(cur:match("zzz%.nvim"))
+    end)
+  end)
+
+  describe("live logs", function()
+    it("show_log streams new log lines into the open popup", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      local p = state.get_plugins()["foo.nvim"]
+      p.status = "building"
+      p.log = { "$ make", "compiling..." }
+      ui.open(config)
+
+      local dash_buf = vim.api.nvim_get_current_buf()
+      local line = find_line(dash_buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.show_log()
+      local log_buf = vim.api.nvim_get_current_buf()
+      assert.are_not_equal(dash_buf, log_buf)
+      local text = table.concat(vim.api.nvim_buf_get_lines(log_buf, 0, -1, false), "\n")
+      assert.is_true(text:match("compiling") ~= nil)
+
+      -- New build output arrives; the live-follow refresh reflects it in-place
+      -- (no reopen), without the popup buffer being replaced.
+      table.insert(p.log, "done")
+      ui.update_log()
+      local text2 = table.concat(vim.api.nvim_buf_get_lines(log_buf, 0, -1, false), "\n")
+      assert.is_true(text2:match("done") ~= nil, "live log did not pick up new line")
+      assert.equals(log_buf, vim.api.nvim_get_current_buf())
+    end)
   end)
 
   describe("disable/enable toggle", function()

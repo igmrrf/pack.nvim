@@ -428,6 +428,10 @@ function M.run_build_hook(plugin, done_cb)
 		return done_cb()
 	end
 
+	-- Remember what we were before flipping to "building": a plugin that was
+	-- already "loaded" (e.g. a rebuild of a loaded plugin via :Pack build) must
+	-- come back to "loaded", not be silently downgraded to "installed". We still
+	-- show "building" for the duration; this is only the target to restore to.
 	local status_before = plugin.status
 	state.update_status(plugin.name, "building")
 	plugin.status = "building"
@@ -445,7 +449,12 @@ function M.run_build_hook(plugin, done_cb)
 		end
 		i = i + 1
 		if i > #steps then
-			local target_status = build_failed and "error" or (status_before or "installed")
+			-- "loaded" wins if the plugin was loaded before the build (rebuild of a
+			-- loaded plugin) OR got loaded mid-build (the install race: load_fn flips
+			-- status while we're building). Otherwise "installed". Never revert to the
+			-- pre-install "missing" placeholder.
+			local became_loaded = status_before == "loaded" or plugin.status == "loaded"
+			local target_status = build_failed and "error" or (became_loaded and "loaded") or "installed"
 			state.update_status(plugin.name, target_status)
 			plugin.status = target_status
 			ui_update()

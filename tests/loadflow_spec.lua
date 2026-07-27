@@ -105,4 +105,30 @@ describe("pack.loader load_fn / flush_pending", function()
     loader.flush_pending()
     assert.same({}, loaded)
   end)
+
+  it("does not eager-load a dependency-only plugin at startup (it loads with its parent)", function()
+    -- dep.nvim is reached ONLY via parent's `dependencies`, so it has no trigger
+    -- of its own. It must stay dormant at startup and load when the (lazy) parent
+    -- eventually loads -- not fire eagerly during flush_pending.
+    state.init(config_with({
+      { "user/parent.nvim", lazy = true, cmd = "ParentCmd", dependencies = { "user/dep.nvim" } },
+    }))
+    simulate_native_add()
+    loader.flush_pending()
+    assert.same({}, loaded)
+    assert.same({ "parent.nvim" }, triggered)
+  end)
+
+  it("still eager-loads a plugin declared top-level even if also used as a dependency", function()
+    -- shared.nvim is BOTH a top-level eager spec and someone's dependency; the
+    -- explicit top-level declaration wins, so it must eager-load at startup.
+    state.init(config_with({
+      { "user/parent.nvim", lazy = true, cmd = "ParentCmd", dependencies = { "user/shared.nvim" } },
+      { "user/shared.nvim" },
+    }))
+    simulate_native_add()
+    loader.flush_pending()
+    assert.same({ "shared.nvim" }, loaded)
+    assert.same({ "parent.nvim" }, triggered)
+  end)
 end)

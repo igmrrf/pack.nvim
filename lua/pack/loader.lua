@@ -459,6 +459,12 @@ function M.flush_pending()
 				end
 				if p.lazy then
 					M.setup_triggers(p)
+				elseif p.implicit then
+					-- Reached ONLY as another plugin's `dependency` and given no trigger
+					-- of its own: it must load WITH its parent (M.load pulls dependencies
+					-- in first), never eagerly at startup. Staying dormant here is what
+					-- keeps a lazy plugin's deps (e.g. mason for a lazy lspconfig) from
+					-- dragging the whole tree in at startup.
 				else
 					table.insert(eager, p)
 				end
