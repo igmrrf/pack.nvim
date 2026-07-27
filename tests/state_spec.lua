@@ -127,7 +127,7 @@ describe("pack.state", function()
     assert.equals("installed", p.status)
   end)
 
-  it("reconcile_from_native trusts entry.active over runtimepath string matching", function()
+  it("reconcile_from_native trusts runtimepath membership over native's active flag", function()
     state.init(config_with({ "user/foo.nvim" }))
     local p = state.get_plugins()["foo.nvim"]
     p.status = "installed"
@@ -135,26 +135,26 @@ describe("pack.state", function()
     local fake_native = {
       get = function()
         return {
-          -- Deliberately NOT a path nvim_list_runtime_paths() would contain --
-          -- native's own authoritative `active` flag must still be trusted.
+          -- Path is NOT on runtimepath. Even though native claims active = true,
+          -- runtimepath membership is authoritative -- a plugin absent from rtp
+          -- is not actually loaded this session, so it stays "installed".
           { spec = { name = "foo.nvim" }, path = "/definitely/not/on/rtp/foo.nvim", rev = "abc", active = true },
         }
       end,
     }
     state.reconcile_from_native(fake_native)
 
-    assert.equals("loaded", p.status)
+    assert.equals("installed", p.status)
   end)
 
-  it("reconcile_from_native adopts an unknown plugin as installed (not loaded) when active = false", function()
+  it("reconcile_from_native adopts an unknown plugin as installed (not loaded) when it is off runtimepath", function()
     state.init(config_with({ "user/foo.nvim" }))
-    local rtp_dir = vim.api.nvim_list_runtime_paths()[1]
     local fake_native = {
       get = function()
         return {
-          -- path happens to be on rtp, but native says it's not active this
-          -- session -- active must win over the incidental path match.
-          { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = rtp_dir, active = false },
+          -- Present in native and on disk, but its path is not on runtimepath,
+          -- so it is installed-but-not-loaded regardless of any active flag.
+          { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = "/nowhere/not/on/rtp/adopted.nvim", active = false },
         }
       end,
     }
