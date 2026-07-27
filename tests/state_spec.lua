@@ -127,6 +127,44 @@ describe("pack.state", function()
     assert.equals("installed", p.status)
   end)
 
+  it("reconcile_from_native trusts entry.active over runtimepath string matching", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local p = state.get_plugins()["foo.nvim"]
+    p.status = "installed"
+
+    local fake_native = {
+      get = function()
+        return {
+          -- Deliberately NOT a path nvim_list_runtime_paths() would contain --
+          -- native's own authoritative `active` flag must still be trusted.
+          { spec = { name = "foo.nvim" }, path = "/definitely/not/on/rtp/foo.nvim", rev = "abc", active = true },
+        }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+
+    assert.equals("loaded", p.status)
+  end)
+
+  it("reconcile_from_native adopts an unknown plugin as installed (not loaded) when active = false", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local rtp_dir = vim.api.nvim_list_runtime_paths()[1]
+    local fake_native = {
+      get = function()
+        return {
+          -- path happens to be on rtp, but native says it's not active this
+          -- session -- active must win over the incidental path match.
+          { spec = { name = "adopted.nvim", src = "https://github.com/x/adopted.nvim" }, path = rtp_dir, active = false },
+        }
+      end,
+    }
+    state.reconcile_from_native(fake_native)
+
+    local a = state.get_plugins()["adopted.nvim"]
+    assert.is_not_nil(a)
+    assert.equals("installed", a.status)
+  end)
+
   it("declared plugins are marked managed = true", function()
     state.init(config_with({ "user/foo.nvim" }))
     assert.is_true(state.get_plugins()["foo.nvim"].managed)
@@ -184,6 +222,32 @@ describe("pack.state", function()
       return { { spec = { name = "new.nvim", src = "https://github.com/x/new.nvim" }, path = "/p/new.nvim" } }
     end })
     assert.equals(gen0 + 1, state.generation) -- one adopted
+  end)
+
+  it("a plugin's own full spec upgrades a bare dependency-stub registered first", function()
+    -- "consumer.nvim" depends on "dep.nvim" via a bare string (no keys/config).
+    -- If it's added first, "dep.nvim" gets a thin stub. The user's own full
+    -- declaration of "dep.nvim" (with keys/opts) must still win, not be dropped.
+    state.init(config_with({}))
+    state.add_plugin({ "user/consumer.nvim", dependencies = { "user/dep.nvim" } }, {})
+    local stub = state.get_plugins()["dep.nvim"]
+    assert.is_not_nil(stub)
+    assert.is_nil(stub.keys)
+
+    state.add_plugin({ "user/dep.nvim", keys = { "<leader>d" }, opts = { x = 1 } }, {})
+    local dep = state.get_plugins()["dep.nvim"]
+    assert.same({ "<leader>d" }, dep.keys)
+    assert.same({ x = 1 }, dep.opts)
+    assert.is_true(dep.lazy, "keys must still infer lazy=true on the upgraded entry")
+  end)
+
+  it("a bare dependency declared after the full spec does not clobber it", function()
+    state.init(config_with({}))
+    state.add_plugin({ "user/dep.nvim", keys = { "<leader>d" }, opts = { x = 1 } }, {})
+    state.add_plugin({ "user/consumer.nvim", dependencies = { "user/dep.nvim" } }, {})
+    local dep = state.get_plugins()["dep.nvim"]
+    assert.same({ "<leader>d" }, dep.keys)
+    assert.same({ x = 1 }, dep.opts)
   end)
 
   it("init resets previously registered plugins", function()

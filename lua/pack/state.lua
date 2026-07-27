@@ -184,15 +184,12 @@ function M.add_plugin(p, config)
 		return {}
 	end
 
+	-- A real, explicit registration for this name already exists: this is a
+	-- duplicate declaration, ignore it. Anything else (an adopted native stub,
+	-- or a stub pulled in only as *someone else's* dependency before this
+	-- plugin's own full spec was processed) is upgradable below.
 	local existing = M.plugins[normalized.name]
-	if existing then
-		if not existing.managed then
-			-- Upgrade adopted stub to a fully managed plugin
-			for k, v in pairs(normalized) do
-				existing[k] = v
-			end
-			return { existing }
-		end
+	if existing and existing.managed and not existing.implicit then
 		return {}
 	end
 
@@ -206,13 +203,21 @@ function M.add_plugin(p, config)
 		if not norm then
 			goto continue
 		end
-		if M.plugins[norm.name] then
+
+		local prev = M.plugins[norm.name]
+		if prev and prev.managed and not prev.implicit then
 			goto continue
 		end
 
 		for _, dep in ipairs(norm.dependencies) do
 			table.insert(queue, dep)
 		end
+
+		-- Only the top-level spec passed to add_plugin is an explicit
+		-- registration; everything reached via `dependencies` is implicit until
+		-- (if ever) its own full spec is registered directly, at which point it
+		-- upgrades in place below instead of being dropped as a duplicate.
+		norm.implicit = curr ~= p
 
 		norm.disabled = disabled_set[norm.name] or false
 		-- Native vim.pack owns the install location; this is the authoritative path
@@ -231,8 +236,20 @@ function M.add_plugin(p, config)
 			norm.status = "missing"
 		end
 
-		M.plugins[norm.name] = norm
-		table.insert(added_list, norm)
+		if prev then
+			-- Upgrade the adopted/implicit stub in place so any table already
+			-- holding a reference to `prev` (e.g. a caller's return value) stays valid.
+			for k in pairs(prev) do
+				prev[k] = nil
+			end
+			for k, v in pairs(norm) do
+				prev[k] = v
+			end
+			table.insert(added_list, prev)
+		else
+			M.plugins[norm.name] = norm
+			table.insert(added_list, norm)
+		end
 		::continue::
 	end
 	if #added_list > 0 then
@@ -331,11 +348,21 @@ function M.reconcile_from_native(native_pack)
 	-- A plugin native itself packadd-ed (e.g. pack.nvim bootstrapped via
 	-- vim.pack.add before setup) is already active on 'runtimepath' but never
 	-- went through our load_fn -- native's pack_add returns early for plugins
-	-- already in its active set, so our loader never marks it "loaded". Detect
-	-- that via runtimepath membership so the dashboard reports it correctly.
+	-- already in its active set, so our loader never marks it "loaded".
+	-- vim.pack.get() reports this authoritatively via `active` (whether the
+	-- plugin was added via vim.pack.add() to the current session); fall back to
+	-- a runtimepath string match only for callers (older native, test mocks)
+	-- that don't set it.
 	local rtp = {}
 	for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
 		rtp[vim.fs.normalize(path)] = true
+	end
+
+	local function is_active(entry)
+		if entry.active ~= nil then
+			return entry.active
+		end
+		return entry.path ~= nil and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] or false
 	end
 
 	local adopted = 0
@@ -350,18 +377,18 @@ function M.reconcile_from_native(native_pack)
 				if p.status == "missing" then
 					p.status = "installed"
 				end
-				if p.status == "installed" and p.dir and rtp[vim.fs.normalize(p.dir)] then
+				if p.status == "installed" and is_active(entry) then
 					p.status = "loaded"
 				end
 			else
 				-- Unknown to pack.nvim: adopt it (present in native, never declared).
-				local on_rtp = entry.path and rtp[vim.fs.normalize(entry.path)] or false
 				M.plugins[name] = {
 					name = name,
 					url = entry.spec and entry.spec.src or nil,
 					dir = entry.path or "",
 					rev = entry.rev,
-					status = on_rtp and "loaded" or ((entry.path and entry.path ~= "") and "installed" or "missing"),
+					status = is_active(entry) and "loaded"
+						or ((entry.path and entry.path ~= "") and "installed" or "missing"),
 					managed = false,
 					disabled = false,
 					lazy = false,
