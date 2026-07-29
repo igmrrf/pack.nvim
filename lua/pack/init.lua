@@ -46,81 +46,12 @@ if not _G.__pack_silent_notify_hooked then
 	end
 end
 
+local delegate = require("pack.delegate")
+
 local function load_plugins(spec)
-	if type(spec) == "table" then
-		if spec.import then
-			return load_plugins(spec.import)
-		end
-		-- Distinguish ONE plugin spec from a LIST of specs (lazy.nvim's rule): it is
-		-- a list only if it has more than one positional entry or a table at [1].
-		-- Otherwise a table carrying a url ([1] string or src=) is a single spec and
-		-- must be returned wrapped -- iterating it would keep only the bare url and
-		-- silently drop opts/config/keys/lazy/etc.
-		if not (#spec > 1 or type(spec[1]) == "table") then
-			if spec[1] or spec.src then
-				return { spec }
-			end
-			return {}
-		end
-		local plugins = {}
-		for _, item in ipairs(spec) do
-			if type(item) == "table" and item.import then
-				local imported = load_plugins(item.import)
-				for _, p in ipairs(imported) do
-					table.insert(plugins, p)
-				end
-			else
-				table.insert(plugins, item)
-			end
-		end
-		return plugins
-	end
-
-	if type(spec) ~= "string" then
-		return {}
-	end
-
-	local plugins = {}
-	local path = spec:gsub("%.", "/")
-	local files = {}
-
-	local user_config_dir = vim.fn.stdpath("config")
-	local user_path = user_config_dir .. "/lua/" .. path
-	if vim.fn.isdirectory(user_path) == 1 then
-		files = vim.fn.glob(user_path .. "/**/*.lua", false, true)
-	end
-
-	if #files == 0 then
-		files = vim.api.nvim_get_runtime_file("lua/" .. path .. "/**/*.lua", true)
-	end
-
-	if #files == 0 then
-		local ok, mod = pcall(require, spec)
-		if ok and type(mod) == "table" then
-			return load_plugins(mod)
-		end
-		return plugins
-	end
-
-	for _, file in ipairs(files) do
-		local norm_file = file:gsub("\\", "/")
-		local mod_path = norm_file:match("lua/(.*)%.lua$")
-		if mod_path then
-			local mod_name = mod_path:gsub("/", ".")
-			local ok, mod = pcall(require, mod_name)
-			if ok and type(mod) == "table" then
-				local sub = load_plugins(mod)
-				for _, p in ipairs(sub) do
-					table.insert(plugins, p)
-				end
-			end
-		end
-	end
-	return plugins
+	return delegate.load_plugins(spec)
 end
 
--- Exposed for tests: normalize a user `plugins`/`import` value into a flat spec
--- list without registering anything.
 M._load_plugins = load_plugins
 
 -- Bulk-register keymaps: { { lhs, rhs, mode = "n"|{...}, desc = "...", ... }, ... }
@@ -137,30 +68,12 @@ function M.map_keys(keys)
 	end
 end
 
--- Build native vim.pack specs for every non-disabled plugin in a state map.
 local function collect_native_specs(plugins_map)
-	local specs = {}
-	for _, p in pairs(plugins_map) do
-		if not p.disabled then
-			local ns = state.to_native_spec(p)
-			if ns then
-				specs[#specs + 1] = ns
-			end
-		end
-	end
-	return specs
+	return delegate.collect_native_specs(plugins_map)
 end
 
 local function chunk_array(arr, chunk_size)
-	local chunks = {}
-	for i = 1, #arr, chunk_size do
-		local chunk = {}
-		for j = i, math.min(i + chunk_size - 1, #arr) do
-			table.insert(chunk, arr[j])
-		end
-		table.insert(chunks, chunk)
-	end
-	return chunks
+	return delegate.chunk_array(arr, chunk_size)
 end
 
 -- Hand a batch of native specs to native vim.pack (which clones/checks out and
@@ -172,12 +85,9 @@ function M._install_and_load(native_specs, confirm)
 		for _, spec in ipairs(native_specs) do
 			local p = state.find_plugin(spec.name, spec.src)
 			if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
+                state.update_status(p.name, "installing")
 				has_uninstalled = true
-				-- Native add runs async; flip the not-yet-present plugin to
-				-- "installing" so the dashboard shows the in-flight state instead of
-				-- leaving it stuck in "missing" ("Not Installed"). load_fn /
-				-- PackChanged(install) move it to installed/loaded when the clone lands.
-				state.update_status(p.name, "installing")
+				break
 			end
 		end
 
@@ -348,173 +258,7 @@ function M.setup(opts)
 	-- Install (native) + load (ours) every configured, non-disabled plugin.
 	M._install_and_load(collect_native_specs(state.get_plugins()), false)
 
-	-- create commands
-	vim.api.nvim_create_user_command("Pack", function(opts)
-		local args_list = {}
-		for word in opts.args:gmatch("%S+") do
-			table.insert(args_list, word)
-		end
-		local subcmd = args_list[1]
-		local target = args_list[2]
-
-		if subcmd == "sync" then
-			-- Sync = install anything missing, then pull updates for everything
-			-- installed. Crucially it runs NON-interactively: the old path called
-			-- native update with no `force`, which pops native vim.pack's own
-			-- confirmation buffer on top of our dashboard. Route installed plugins
-			-- through the async updater (force=true, no native UI, drives the
-			-- dashboard's own spinner/status) and hand missing ones to the installer.
-			local to_install, to_update = {}, {}
-			for name, p in pairs(state.get_plugins()) do
-				if not p.disabled and p.managed ~= false and not p.is_local then
-					if p.status == "missing" then
-						local ns = state.to_native_spec(p)
-						if ns then
-							to_install[#to_install + 1] = ns
-						end
-					else
-						to_update[#to_update + 1] = name
-					end
-				end
-			end
-			if #to_install > 0 then
-				M._install_and_load(to_install, false)
-			end
-			if #to_update > 0 then
-				require("pack.async").update_plugins(to_update)
-			end
-		elseif subcmd == "update" then
-			if target then
-				if state.get_plugins()[target] then
-					native_call("update", M.native_pack.update, { target })
-				else
-					vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
-				end
-			else
-				native_call("update", M.native_pack.update)
-			end
-		elseif subcmd == "build" then
-			if target then
-				local p = state.get_plugins()[target]
-				if p then
-					require("pack.async").run_build_hook(p, function()
-						vim.notify("pack: Built " .. target)
-					end)
-				else
-					vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
-				end
-			else
-				for _, p in pairs(state.get_plugins()) do
-					require("pack.async").run_build_hook(p, function() end)
-				end
-				vim.notify("pack: Triggered builds")
-			end
-		elseif subcmd == "load" then
-			if target then
-				require("pack.loader").load(target)
-				vim.notify("pack: Loaded " .. target)
-			end
-		elseif subcmd == "delete" then
-			if target then
-				vim.pack.del({ target })
-				vim.notify("pack: Deleted " .. target)
-			end
-		elseif subcmd == "clean" then
-			-- Remove plugins native still manages (on disk / in lockfile) that are no
-			-- longer in the configured spec (or were tracked as unmanaged/adopted).
-			local ok_get, managed = pcall(function()
-				return M.native_pack.get and M.native_pack.get() or {}
-			end)
-			if not ok_get then
-				managed = {}
-			end
-			local configured = state.get_plugins()
-			local removed = 0
-			for _, entry in ipairs(managed) do
-				local name = entry.spec and entry.spec.name
-				if name and not (configured[name] and configured[name].managed) then
-					pcall(function()
-						vim.pack.del({ name })
-					end)
-					vim.notify("pack: Removed unused plugin " .. name)
-					removed = removed + 1
-				end
-			end
-			if removed == 0 then
-				vim.notify("pack: Already clean")
-			end
-		elseif subcmd == "restore" then
-			-- force is left false, so native shows its confirmation buffer (a diff of
-			-- what would change) before rolling the working trees back to the
-			-- lockfile. This is intentionally review-gated: restore can undo real
-			-- updates. Use :Pack repair for the opposite (lockfile -> disk).
-			native_call("restore", M.native_pack.update, nil, { target = "lockfile" })
-		elseif subcmd == "repair" then
-			-- Realign the lockfile's recorded revisions to the installed HEADs. Fixes
-			-- the "not at expected revision" health errors that arise when an update
-			-- checked out new revisions but the lockfile write did not persist.
-			local ok_lf, lockfile = pcall(require, "pack.lockfile")
-			if not ok_lf then
-				vim.notify("pack: lockfile helper unavailable", vim.log.levels.ERROR)
-				return
-			end
-			local fixed, err = lockfile.repair(state.native_opt_dir())
-			if not fixed then
-				vim.notify("pack: repair failed: " .. tostring(err), vim.log.levels.ERROR)
-			elseif #fixed == 0 then
-				vim.notify("pack: lockfile already matches installed revisions")
-			else
-				vim.notify(
-					("pack: aligned lockfile to installed revisions for %d plugin(s): %s\nRestart Neovim (:restart) for native vim.pack to pick it up."):format(
-						#fixed,
-						table.concat(fixed, ", ")
-					)
-				)
-			end
-		elseif subcmd == "profile" then
-			ui.open(M.config)
-			ui.show_profile()
-		elseif subcmd == "diff" then
-			require("pack.async").show_diff()
-		else
-			ui.open(M.config)
-		end
-	end, {
-		nargs = "*",
-		complete = function(ArgLead, CmdLine, CursorPos)
-			local args = {}
-			for word in CmdLine:sub(1, CursorPos):gmatch("%S+") do
-				table.insert(args, word)
-			end
-			if CmdLine:sub(CursorPos, CursorPos):match("%s") then
-				table.insert(args, "")
-			end
-
-			if #args <= 2 then
-				local subcommands =
-					{ "sync", "clean", "restore", "repair", "profile", "diff", "update", "build", "load", "delete" }
-				local matches = {}
-				for _, cmd in ipairs(subcommands) do
-					if cmd:find("^" .. vim.pesc(ArgLead)) then
-						table.insert(matches, cmd)
-					end
-				end
-				return matches
-			elseif #args == 3 then
-				local subcmd = args[2]
-				if subcmd == "update" or subcmd == "build" or subcmd == "load" or subcmd == "delete" then
-					local matches = {}
-					for name, _ in pairs(state.get_plugins()) do
-						if name:find("^" .. vim.pesc(ArgLead)) then
-							table.insert(matches, name)
-						end
-					end
-					return matches
-				end
-			end
-			return {}
-		end,
-	})
+	require("pack.commands").setup_user_command(M)
 end
 
 return M

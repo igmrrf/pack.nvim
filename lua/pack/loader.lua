@@ -2,22 +2,30 @@ local state = require("pack.state")
 
 local M = {}
 
--- Path of the precompiled ftdetect cache. Overridable for tests so each test
--- writes an isolated file instead of racing on the shared
--- stdpath('data')/pack_ftdetect_cache.lua (a scheduled/other-test build_cache
--- could otherwise overwrite it mid-assert).
-local ftdetect_cache_override = nil
+local search_mod = require("pack.loader.search")
+local triggers_mod = require("pack.loader.triggers")
 
-local function ftdetect_cache_path()
-	return ftdetect_cache_override or vim.fs.joinpath(vim.fn.stdpath("data"), "pack_ftdetect_cache.lua")
+function M.setup_triggers(p)
+	triggers_mod.setup_triggers(p, function(name)
+		M.load(name)
+	end)
 end
 
-function M._set_ftdetect_cache_path_for_testing(path)
-	ftdetect_cache_override = path
+function M.remove_triggers(p)
+	triggers_mod.remove_triggers(p)
 end
 
--- Generate :help tags for a plugin's doc/ directory so `:help <tag>` works for
--- managed plugins (native vim.pack / :packadd does not do this automatically).
+function M.enable(p)
+	if p.status == "loaded" then
+		return
+	end
+	if p.lazy then
+		M.setup_triggers(p)
+	else
+		M.load(p.name)
+	end
+end
+
 local function gen_helptags(dir)
 	if not dir or dir == "" then
 		return
@@ -36,10 +44,6 @@ local function packadd(name)
 	return ok
 end
 
--- Load a local (`dir=`) plugin. Native vim.pack never manages it and it lives
--- outside the packpath's opt dir, so `:packadd` can't find it: add its directory
--- to 'runtimepath' (for lua/ requires) and source its plugin/ files the way
--- packadd would.
 local function load_local(p)
 	if not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0 then
 		vim.notify(
@@ -60,339 +64,18 @@ local function load_local(p)
 	return true
 end
 
--- Fields vim.keymap.set's `opts` actually accepts (see :h vim.keymap.set() /
--- :map-arguments). Everything else on a keys entry is pack.nvim/lazy.nvim
--- spec metadata (e.g. a per-key `ft`, `cond`) that must never reach it --
--- nvim_set_keymap() errors ("invalid key: ...") on an unrecognized field.
-local KEYMAP_OPTS = {
-	buffer = true,
-	buf = true,
-	desc = true,
-	expr = true,
-	noremap = true,
-	nowait = true,
-	remap = true,
-	replace_keycodes = true,
-	script = true,
-	silent = true,
-	unique = true,
-	callback = true,
-}
-
--- Accepts: "<lhs>" | { "<lhs>", mode=... } | { "<lhs>", rhs, mode=..., desc=..., ... }
-local function normalize_key_entries(raw)
-	local entries = {}
-	local list = type(raw) == "table" and raw or { raw }
-	for _, k in ipairs(list) do
-		if type(k) == "string" then
-			table.insert(entries, { lhs = k, rhs = nil, modes = { "n" }, opts = {} })
-		else
-			local modes = k.mode or "n"
-			modes = type(modes) == "table" and modes or { modes }
-			local opts = {}
-			for key, value in pairs(k) do
-				if KEYMAP_OPTS[key] then
-					opts[key] = value
-				end
-			end
-			table.insert(entries, { lhs = k[1] or k.lhs, rhs = k[2], modes = modes, opts = opts })
-		end
-	end
-	return entries
-end
-
--- Entries with an explicit rhs are mapped directly (mirrors pack.map_keys) once
--- the plugin is loaded. Before that (still lazy), each entry gets a
--- placeholder that loads the plugin on first press then replays the keypress
--- so the plugin's own (or the entry's) rhs fires -- M.load calls this again
--- once the plugin is actually loaded, however it got loaded, to rebind every
--- entry for real.
-local function setup_keys(p)
-	for _, entry in ipairs(normalize_key_entries(p.keys)) do
-		local lhs = entry.lhs
-		if not lhs then
-			vim.notify("pack: '" .. p.name .. "' has a keys entry with no lhs - skipping", vim.log.levels.WARN)
-		elseif p.status == "loaded" then
-			if entry.rhs == nil then
-				vim.notify(
-					"pack: '"
-						.. p.name
-						.. "' keys entry '"
-						.. lhs
-						.. "' has no rhs and the plugin isn't lazy - nothing to bind",
-					vim.log.levels.WARN
-				)
-			else
-				for _, mode in ipairs(entry.modes) do
-					vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
-				end
-			end
-		else
-			local function trigger()
-				for _, mode in ipairs(entry.modes) do
-					pcall(vim.keymap.del, mode, lhs)
-				end
-				M.load(p.name)
-				local replay = function()
-					vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(lhs, true, true, true), "m", false)
-				end
-				if entry.rhs == nil then
-					-- rely on the plugin's own config() to have (re)defined this mapping
-					replay()
-				elseif type(entry.rhs) == "function" then
-					for _, mode in ipairs(entry.modes) do
-						vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
-					end
-					entry.rhs()
-				else
-					for _, mode in ipairs(entry.modes) do
-						vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
-					end
-					replay()
-				end
-			end
-			local trigger_opts = vim.tbl_extend("force", { desc = "pack: lazy-load " .. p.name }, entry.opts)
-			for _, mode in ipairs(entry.modes) do
-				vim.keymap.set(mode, lhs, trigger, trigger_opts)
-			end
-		end
-	end
-end
-
-local seen_cmds = {}
-
-function M.setup_triggers(p)
-	local group
-	if p.event or p.ft then
-		group = vim.api.nvim_create_augroup("pack_trigger_" .. p.name, { clear = true })
-	end
-
-	if p.cmd then
-		local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
-		for _, cmd in ipairs(cmds) do
-			if seen_cmds[cmd] and seen_cmds[cmd] ~= p.name then
-				vim.notify(
-					"pack: command '"
-						.. cmd
-						.. "' already registered by "
-						.. seen_cmds[cmd]
-						.. ", overwriting for "
-						.. p.name,
-					vim.log.levels.WARN
-				)
-			end
-			seen_cmds[cmd] = p.name
-			vim.api.nvim_create_user_command(cmd, function(args)
-				vim.api.nvim_del_user_command(cmd)
-				M.load(p.name)
-				local cmd_str = cmd
-				if args.args and args.args ~= "" then
-					cmd_str = cmd_str .. " " .. args.args
-				end
-				if args.bang then
-					cmd_str = cmd_str .. "!"
-				end
-				pcall(vim.cmd, cmd_str)
-			end, { nargs = "*", bang = true, complete = "file", force = true })
-		end
-	end
-
-	if p.event then
-		local events = type(p.event) == "table" and p.event or { p.event }
-		for _, event in ipairs(events) do
-			local ev_name = event
-			local pat = p.pattern
-			if type(event) == "table" then
-				ev_name = event.event
-				pat = event.pattern or pat
-			elseif type(event) == "string" and event:find(" ") then
-				ev_name, pat = event:match("^(%S+)%s+(.+)$")
-			end
-
-			vim.api.nvim_create_autocmd(ev_name, {
-				group = group,
-				pattern = pat,
-				once = true,
-				callback = function()
-					M.load(p.name)
-				end,
-			})
-		end
-	end
-
-	if p.ft then
-		local fts = type(p.ft) == "table" and p.ft or { p.ft }
-		vim.api.nvim_create_autocmd("FileType", {
-			group = group,
-			pattern = fts,
-			once = true,
-			callback = function()
-				M.load(p.name)
-			end,
-		})
-	end
-
-	if p.keys then
-		setup_keys(p)
-	end
-end
-
-function M.remove_triggers(p)
-	pcall(vim.api.nvim_del_augroup_by_name, "pack_trigger_" .. p.name)
-
-	if p.cmd then
-		local cmds = type(p.cmd) == "table" and p.cmd or { p.cmd }
-		for _, cmd in ipairs(cmds) do
-			if seen_cmds[cmd] == p.name then
-				pcall(vim.api.nvim_del_user_command, cmd)
-				seen_cmds[cmd] = nil
-			end
-		end
-	end
-
-	if p.keys then
-		for _, entry in ipairs(normalize_key_entries(p.keys)) do
-			for _, mode in ipairs(entry.modes) do
-				pcall(vim.keymap.del, mode, entry.lhs)
-			end
-		end
-	end
-end
-
-function M.enable(p)
-	if p.status == "loaded" then
-		return
-	end
-	if p.lazy then
-		M.setup_triggers(p)
-	else
-		M.load(p.name)
-	end
+function M._set_ftdetect_cache_path_for_testing(path)
+	search_mod._set_ftdetect_cache_path_for_testing(path)
 end
 
 function M.build_cache()
-	local cache_file = ftdetect_cache_path()
-	local plugins = require("pack.state").get_plugins()
-	local lines = {}
-	for _, p in pairs(plugins) do
-		if not p.disabled and p.lazy and (p.status == "installed" or p.status == "loaded") then
-			local ftdetect_vim = vim.fn.globpath(p.dir, "ftdetect/*.vim", true, true)
-			for _, file in ipairs(ftdetect_vim) do
-				table.insert(lines, 'vim.cmd("source " .. ' .. string.format("%q", vim.fn.fnameescape(file)) .. ")")
-			end
-			local ftdetect_lua = vim.fn.globpath(p.dir, "ftdetect/*.lua", true, true)
-			for _, file in ipairs(ftdetect_lua) do
-				table.insert(lines, "dofile(" .. string.format("%q", file) .. ")")
-			end
-		end
-	end
-	local f = io.open(cache_file, "w")
-	if f then
-		if #lines > 0 then
-			f:write(table.concat(lines, "\n") .. "\n")
-		end
-		f:close()
-	end
-end
-
--- modname -> plugin lookup, rebuilt only when state.generation changes so the
--- searcher stays O(1) per require instead of rescanning every plugin each time.
-local mod_cache = { gen = -1, map = {} }
-local in_ftdetect = false
-
-local function resolve_plugin(modname)
-	if mod_cache.gen ~= state.generation then
-		local map = {}
-		-- Iterate in a stable (sorted) order so that when two plugins share a base
-		-- or head segment, the same one deterministically wins the mapping instead
-		-- of depending on pairs() iteration order.
-		local plugins = state.get_plugins()
-		local names = {}
-		for name in pairs(plugins) do
-			names[#names + 1] = name
-		end
-		table.sort(names)
-		for _, name in ipairs(names) do
-			local p = plugins[name]
-			local base = p.main or (name:match("([^/]+)$") or name):gsub("%.nvim$", "")
-			map[name] = map[name] or p
-			map[name:gsub("-", "_")] = map[name:gsub("-", "_")] or p
-			map[base] = map[base] or p
-			map[base:gsub("-", "_")] = map[base:gsub("-", "_")] or p
-			local head = base:match("^([^.]+)")
-			if head and head ~= base then
-				map[head] = map[head] or p
-				map[head:gsub("-", "_")] = map[head:gsub("-", "_")] or p
-			end
-		end
-		mod_cache.map = map
-		mod_cache.gen = state.generation
-	end
-	local map = mod_cache.map
-	local head = modname:match("^([^.]+)")
-	return map[modname] or map[modname:gsub("-", "_")] or (head and map[head]) or (head and map[head:gsub("-", "_")])
+	search_mod.build_cache()
 end
 
 function M.init(config)
-	in_ftdetect = true
-	pcall(dofile, ftdetect_cache_path())
-	in_ftdetect = false
-
-	-- Intercept requires for disabled plugins to prevent configuration crashes.
-	-- If a disabled module is required directly (not inside pcall), we return a deep mock table.
-	if not M._searcher_installed then
-		table.insert(package.loaders or package.searchers, 1, function(modname)
-			if in_ftdetect then
-				return nil
-			end
-			local target_p = resolve_plugin(modname)
-
-			if target_p then
-				if target_p.disabled then
-					local level = 1
-					local in_pcall = false
-					while true do
-						local info = debug.getinfo(level, "fn")
-						if not info then
-							break
-						end
-						if info.func == pcall or info.func == xpcall then
-							in_pcall = true
-							break
-						end
-						level = level + 1
-					end
-
-					if in_pcall then
-						return nil
-					end
-
-					return function()
-						local function make_mock()
-							local mock = {}
-							setmetatable(mock, {
-								__index = function()
-									return make_mock()
-								end,
-								__call = function()
-									return make_mock()
-								end,
-							})
-							return mock
-						end
-						return make_mock()
-					end
-				elseif target_p.status == "installed" and target_p.lazy and target_p.module ~= false then
-					M.load(target_p.name)
-					return nil
-				end
-			end
-		end)
-		M._searcher_installed = true
-	end
-	-- Native vim.pack installs plugins under stdpath('data')/site/pack/core/opt,
-	-- which is already on 'packpath', so :packadd resolves by name with no
-	-- prepending needed. (The old custom installer required packpath munging here.)
+	search_mod.setup_package_searcher(function(name)
+		M.load(name)
+	end)
 end
 
 -- Plugins recorded by load_fn during vim.pack.add, awaiting our ordered load.
@@ -557,7 +240,9 @@ function M.load(name, opts)
 		-- already tore down the lazy placeholders; without this they'd just stay
 		-- gone since only the specific key that was pressed (if any) rebinds itself.
 		if p.keys then
-			setup_keys(p)
+			triggers_mod.setup_keys(p, function(name)
+				M.load(name)
+			end)
 		end
 	else
 		-- packadd/local-load failed: record it so triggers stop re-attempting.
