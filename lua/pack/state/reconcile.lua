@@ -32,10 +32,13 @@ function M.reconcile_from_native(plugins, native_pack, incr_generation_cb)
 	end
 
 	local function is_active(entry)
+		if not (entry.path and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] == true) then
+			return false
+		end
 		if entry.active ~= nil then
 			return entry.active
 		end
-		return entry.path ~= nil and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] == true
+		return true
 	end
 
 	local adopted = 0

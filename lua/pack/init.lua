@@ -15,6 +15,7 @@ M.config = {
 		border = "rounded",
 		auto_open = true, -- Automatically open dashboard float when uninstalled plugins exist
 		silent = nil, -- Silences native vim.pack cmdline messages. If nil, defaults to auto_open
+		filter = "default", -- "default" (vim.ui.input) or "input" (vim.fn.input)
 		icons = {
 			loaded = "●",
 			not_loaded = "○",
@@ -170,6 +171,8 @@ local function native_call(desc, fn, ...)
 	end
 	return ok
 end
+
+M.native_call = native_call
 
 function M.setup(opts)
 	-- Extract the raw plugins spec but DO NOT resolve it yet; load_plugins must run

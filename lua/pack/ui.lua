@@ -48,12 +48,25 @@ function M.set_tab(index)
 end
 
 function M.filter()
-	vim.ui.input({ prompt = "Filter Plugins: ", default = search_term }, function(input)
+	local filter_type = (config_ref and config_ref.ui and config_ref.ui.filter) or "default"
+	local prompt = "Filter Plugins: "
+	local function set_search(input)
 		if input ~= nil then
 			search_term = input:lower()
 			M.update({ jump_to_first = true })
 		end
-	end)
+	end
+
+	if type(filter_type) == "function" then
+		filter_type({ prompt = prompt, default = search_term }, set_search)
+	elseif filter_type == "input" then
+		local ok, input = pcall(vim.fn.input, prompt, search_term)
+		if ok then
+			set_search(input)
+		end
+	else
+		vim.ui.input({ prompt = prompt, default = search_term }, set_search)
+	end
 end
 
 function M.open_popup(lines, opts)
@@ -192,7 +205,7 @@ function M.update(opts)
 		win_width = vim.api.nvim_win_get_width(win_id)
 	end
 
-	local help_str = "press g? for help"
+	local help_str = "press ? for help"
 	local help_pad = math.max(0, math.floor((win_width - #help_str) / 2))
 	local help_line = string.rep(" ", help_pad) .. help_str
 
@@ -220,6 +233,8 @@ function M.update(opts)
 		render.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
 	end
 
+	tabbar_mod.render_quick_help(lines, highlights, current_tab)
+
 	vim.bo[buf_id].modifiable = true
 	vim.api.nvim_buf_set_lines(buf_id, 0, -1, false, lines)
 	vim.bo[buf_id].modifiable = false
@@ -238,27 +253,26 @@ function M.update(opts)
 	end
 
 	if cursor and win_id and vim.api.nvim_win_is_valid(win_id) then
+		local placed = false
 		if prev_plugin_name and not (initial_focus or opts.jump_to_first) then
-			local found_line = nil
 			for i = 1, #lines do
 				local p = plugin_map[i]
 				if p and p.name == prev_plugin_name then
-					found_line = i
-					break
-				end
-			end
-			if found_line then
-				cursor[1] = found_line
-			end
-		elseif initial_focus or opts.jump_to_first then
-			for i = 1, #lines do
-				if plugin_map[i] then
 					cursor[1] = i
+					placed = true
 					break
 				end
 			end
 		end
-		initial_focus = false
+		if (not placed and (initial_focus or opts.jump_to_first)) or (initial_focus or opts.jump_to_first) then
+			for i = 1, #lines do
+				if plugin_map[i] then
+					cursor[1] = i
+					initial_focus = false
+					break
+				end
+			end
+		end
 
 		if cursor[1] > #lines then
 			cursor[1] = #lines

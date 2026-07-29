@@ -37,11 +37,20 @@ Initialize pack.nvim in your init.lua:
 USAGE                                                              *pack-usage*
 
 Commands:
-    :Pack        Open the pack.nvim dashboard.
-    :Pack sync   Update all plugins and build them.
+    :Pack             Open the pack.nvim dashboard.
+    :Pack sync        Update all plugins and build them.
+    :Pack update [name] Update specified plugin or all plugins.
+    :Pack clean       Remove plugin directories no longer in configuration.
+    :Pack restore     Roll every plugin back to the native vim.pack lockfile.
+    :Pack repair      Align lockfile revisions to installed HEAD commits.
+    :Pack build [name] Re-run build hook for a plugin (or all plugins).
+    :Pack load <name> Load a lazy plugin immediately.
+    :Pack delete <name> Delete plugin via native vim.pack.
+    :Pack profile     Show startup profile load time chart.
+    :Pack diff        Show pending updates diff for outdated plugins.
 
 In the dashboard, you can use the following default mappings:
-    `g?`       - Show help popup
+    `?`        - Show help popup
     `q`        - Close dashboard
     `<CR>`     - Toggle plugin details inline
     `K`        - Show full plugin details (commit info)
@@ -49,6 +58,11 @@ In the dashboard, you can use the following default mappings:
     `x`        - Toggle disable/enable on the cursor plugin
     `u`        - Update cursor plugin (in Outdated tab)
     `U`        - Update all outdated plugins
+    `d`        - View pending updates diff
+    `l`        - View logs
+    `/`        - Filter plugins by name, cat:category, tag:tag
+
+Each tab also displays a contextual quick help bar at the bottom.
 
 ==============================================================================
 KNOWN LIMITATIONS                                            *pack-limitations*
@@ -74,11 +88,12 @@ sharp edges:
 ==============================================================================
 CONFIGURATION                                                *pack-configuration*
 
-`pack.add(plugins, opts)` accepts an `opts` table for configuration:
+`pack.setup(opts)` accepts an `opts` table for configuration:
 
 Options:
     `ui`             Table of UI configuration.
       `border`       String or Table. Window border style (e.g. "rounded").
+      `filter`       String or Function. Filter input mode ("default", "input", or callback).
 
 ==============================================================================
  vim:tw=78:ts=8:ft=help:norl:

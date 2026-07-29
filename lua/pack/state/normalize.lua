@@ -115,7 +115,8 @@ function M.normalize(plugin, config)
 		is_lazy = (plugin.cmd ~= nil or plugin.event ~= nil or plugin.ft ~= nil or plugin.keys ~= nil)
 	end
 
-	local dir = is_local and full_url or vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt", name)
+	local state = require("pack.state")
+	local dir = is_local and full_url or vim.fs.joinpath(state.native_opt_dir(), name)
 	local status = "missing"
 	if vim.fn.isdirectory(dir) == 1 then
 		status = "installed"

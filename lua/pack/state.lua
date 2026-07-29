@@ -9,10 +9,14 @@ M.plugins = {}
 -- this to know when to rebuild instead of rescanning on every lookup.
 M.generation = 0
 
--- Directory native vim.pack installs plugins into (fixed, not configurable):
--- stdpath('data')/site/pack/core/opt.
+local native_opt_dir_override = nil
+
 function M.native_opt_dir()
-	return vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
+	return native_opt_dir_override or vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
+end
+
+function M._set_native_opt_dir_for_testing(path)
+	native_opt_dir_override = path
 end
 
 local norm_mod = require("pack.state.normalize")

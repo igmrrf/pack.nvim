@@ -4,7 +4,7 @@ local M = {}
 
 M.KEYMAP_HELP = {
 	{ key = "q", scope = "all", desc = "close dashboard" },
-	{ key = "g?", scope = "all", desc = "show this help popup" },
+	{ key = "?", scope = "all", desc = "show this help popup" },
 	{ key = "S", scope = "all", desc = "sync all (install missing, pull updates)" },
 	{ key = "C", scope = "all", desc = "clean unused plugins (no longer in spec)" },
 	{ key = "X", scope = "all", desc = "uninstall cursor/selected plugin from disk" },

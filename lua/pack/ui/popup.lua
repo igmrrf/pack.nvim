@@ -86,7 +86,7 @@ function M.show_help()
 	for _, entry in ipairs(render.KEYMAP_HELP) do
 		table.insert(lines, string.format("  %-10s %-18s %s", entry.key, entry.scope, entry.desc))
 	end
-	M.open_popup(lines, { close_keys = { "q", "g?", "<Esc>" }, width_pct = 0.75 })
+	M.open_popup(lines, { close_keys = { "q", "?", "<Esc>" }, width_pct = 0.75 })
 end
 
 function M.show_full_details(p)

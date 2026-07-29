@@ -36,11 +36,9 @@ function M.create_window(config, update_ui_cb)
 			end,
 		})
 	else
-		vim.schedule(function()
-			if win_id and vim.api.nvim_win_is_valid(win_id) then
-				vim.api.nvim_set_current_win(win_id)
-			end
-		end)
+		if win_id and vim.api.nvim_win_is_valid(win_id) then
+			vim.api.nvim_set_current_win(win_id)
+		end
 	end
 
 	vim.api.nvim_create_autocmd("VimResized", {
@@ -66,7 +64,7 @@ function M.create_window(config, update_ui_cb)
 
 	local opts = { buffer = buf_id, noremap = true, silent = true, nowait = true }
 	vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
-	vim.keymap.set("n", "g?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
+	vim.keymap.set("n", "?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
 	vim.keymap.set("n", "S", "<Cmd>Pack sync<CR>", opts)
 	vim.keymap.set("n", "C", "<Cmd>lua require('pack.ui').clean()<CR>", opts)
 	vim.keymap.set("n", "X", "<Cmd>lua require('pack.ui').uninstall()<CR>", opts)

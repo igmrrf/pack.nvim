@@ -30,4 +30,17 @@ function M.render_tab_bar(lines, highlights, current_tab)
 	table.insert(lines, "")
 end
 
+M.FOOTER_HELP = {
+	all = "  S sync  •  C clean  •  Space select  •  Enter details  •  K info  •  l log  •  / filter  •  q close",
+	outdated = "  c check  •  u update  •  U update all  •  d diff  •  Enter details  •  / filter  •  q close",
+	disabled = "  x enable  •  Space select  •  v clear select  •  Enter details  •  / filter  •  q close",
+}
+
+function M.render_quick_help(lines, highlights, current_tab)
+	local help_text = M.FOOTER_HELP[current_tab] or M.FOOTER_HELP.all
+	table.insert(lines, "")
+	table.insert(lines, help_text)
+	table.insert(highlights, { line = #lines - 1, col_start = 0, col_end = -1, hl = "Comment" })
+end
+
 return M

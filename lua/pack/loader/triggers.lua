@@ -186,4 +186,8 @@ function M.remove_triggers(p)
 	end
 end
 
+function M.reset()
+	seen_cmds = {}
+end
+
 return M

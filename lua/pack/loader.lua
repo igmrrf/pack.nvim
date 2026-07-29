@@ -257,9 +257,9 @@ function M.load(name, opts)
 end
 function M._reset_for_testing()
 	pending = {}
-	seen_cmds = {}
-	mod_cache = { gen = -1, map = {} }
 	loading = {}
+	triggers_mod.reset()
+	search_mod.reset_cache()
 end
 
 return M

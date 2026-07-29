@@ -47,6 +47,7 @@ require("pack").setup({
   },
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
+    filter = "default", -- Options: "default" (vim.ui.input), "input" (vim.fn.input), or fun(opts, cb)
     icons = {
       loaded = "●",
       not_loaded = "○",
@@ -192,7 +193,7 @@ Subcommands with a `<name>` argument tab-complete against your configured plugin
 When inside the dashboard (opened via `:Pack`), you can use the following keymaps:
 
 *   `q` - Close the dashboard or any popup.
-*   `g?` - Show the full keymap help popup.
+*   `?` - Show the full keymap help popup.
 *   `S` - Start a Sync operation (install/update).
 *   `Tab` (or `1`/`2`/`3`) - Cycle tabs: All -> Outdated -> Disabled.
 *   `<Enter>` - Quick details for the plugin under the cursor.
@@ -205,6 +206,8 @@ When inside the dashboard (opened via `:Pack`), you can use the following keymap
 *   `u` - Update the plugin under the cursor (Outdated tab).
 *   `U` - Update every outdated plugin (Outdated tab).
 *   `/` - Filter the dashboard by plugin name, category (`/cat:lsp`), or tag (`/tag:ui`).
+
+*Each tab also renders a contextual quick-help bar at the bottom with tab-relevant action shortcuts.*
 
 ## 📊 Comparison Matrix
 

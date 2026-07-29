@@ -24,10 +24,21 @@ local function append_log(plugin, line)
 	end
 end
 
+local ui_update_timer = nil
+
 local function ui_update()
-	if package.loaded["pack.ui"] then
-		require("pack.ui").update()
+	if not package.loaded["pack.ui"] then
+		return
 	end
+	if ui_update_timer then
+		return
+	end
+	ui_update_timer = vim.defer_fn(function()
+		ui_update_timer = nil
+		if package.loaded["pack.ui"] then
+			require("pack.ui").update()
+		end
+	end, 50)
 end
 
 local git_mod = require("pack.async.git")
@@ -99,7 +110,7 @@ function M.check_outdated(plugin, done)
 		return finish()
 	end
 	local dir = plugin.dir
-	if not dir or dir == "" or vim.fn.isdirectory(dir) == 0 then
+	if not dir or dir == "" or vim.fn.isdirectory(dir) == 0 or not vim.uv.fs_stat(vim.fs.joinpath(dir, ".git")) then
 		return finish()
 	end
 	-- Re-entrancy guard: a second check (double `c`, or `c` racing the auto-check
