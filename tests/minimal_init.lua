@@ -1,3 +1,12 @@
+local test_sandbox = vim.fn.tempname() .. "-pack-test-sandbox"
+vim.fn.mkdir(test_sandbox .. "/data", "p")
+vim.fn.mkdir(test_sandbox .. "/config", "p")
+vim.fn.mkdir(test_sandbox .. "/state", "p")
+
+vim.env.XDG_DATA_HOME = test_sandbox .. "/data"
+vim.env.XDG_CONFIG_HOME = test_sandbox .. "/config"
+vim.env.XDG_STATE_HOME = test_sandbox .. "/state"
+
 local root = vim.fn.getcwd()
 vim.opt.runtimepath:prepend(root)
 

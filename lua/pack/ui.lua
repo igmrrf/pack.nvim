@@ -205,15 +205,7 @@ function M.update(opts)
 		win_width = vim.api.nvim_win_get_width(win_id)
 	end
 
-	local help_str = "press ? for help"
-	local help_pad = math.max(0, math.floor((win_width - #help_str) / 2))
-	local help_line = string.rep(" ", help_pad) .. help_str
-
-	table.insert(lines, help_line)
-	table.insert(
-		highlights,
-		{ line = #lines - 1, col_start = help_pad, col_end = help_pad + #help_str, hl = "Comment" }
-	)
+	tabbar_mod.render_quick_help(lines, highlights, current_tab)
 
 	local status_line, is_active, status_pad = spinner_mod.get_status_line(win_width)
 	if is_active then
@@ -232,8 +224,6 @@ function M.update(opts)
 	else
 		render.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
 	end
-
-	tabbar_mod.render_quick_help(lines, highlights, current_tab)
 
 	vim.bo[buf_id].modifiable = true
 	vim.api.nvim_buf_set_lines(buf_id, 0, -1, false, lines)
