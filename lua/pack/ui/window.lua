@@ -20,7 +20,7 @@ function M.create_window(config, update_ui_cb)
 		row = row,
 		col = col,
 		border = config.ui.border,
-		title = " Pack.nvim ",
+		title = " 📦 Pack.nvim ",
 		title_pos = "center",
 		style = "minimal",
 	})
@@ -55,7 +55,7 @@ function M.create_window(config, update_ui_cb)
 				height = h,
 				row = math.floor((vim.o.lines - h) / 2),
 				col = math.floor((vim.o.columns - w) / 2),
-				title = " Pack.nvim ",
+				title = " 📦 Pack.nvim ",
 				title_pos = "center",
 			})
 			update_ui_cb()
@@ -66,21 +66,22 @@ function M.create_window(config, update_ui_cb)
 	vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
 	vim.keymap.set("n", "?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)
 	vim.keymap.set("n", "S", "<Cmd>Pack sync<CR>", opts)
+	vim.keymap.set("n", "s", "<Cmd>lua require('pack.ui').sync_one()<CR>", opts)
 	vim.keymap.set("n", "C", "<Cmd>lua require('pack.ui').clean()<CR>", opts)
-	vim.keymap.set("n", "X", "<Cmd>lua require('pack.ui').uninstall()<CR>", opts)
+	vim.keymap.set("n", "D", "<Cmd>lua require('pack.ui').delete_all_disabled()<CR>", opts)
+	vim.keymap.set("n", "d", "<Cmd>lua require('pack.ui').delete_one()<CR>", opts)
 	vim.keymap.set("n", "<Space>", "<Cmd>lua require('pack.ui').toggle_select()<CR>", opts)
-	vim.keymap.set("n", "v", "<Cmd>lua require('pack.ui').clear_select()<CR>", opts)
+	vim.keymap.set("n", "v", "<Cmd>lua require('pack.ui').toggle_select_ui()<CR>", opts)
 	vim.keymap.set("n", "<CR>", "<Cmd>lua require('pack.ui').toggle_details()<CR>", opts)
 	vim.keymap.set("n", "K", "<Cmd>lua require('pack.ui').show_full_details()<CR>", opts)
-	vim.keymap.set("n", "l", "<Cmd>lua require('pack.ui').show_log()<CR>", opts)
 	vim.keymap.set("n", "p", "<Cmd>lua require('pack.ui').show_profile()<CR>", opts)
-	vim.keymap.set("n", "d", "<Cmd>lua require('pack.async').show_diff()<CR>", opts)
 	vim.keymap.set("n", "<Tab>", "<Cmd>lua require('pack.ui').cycle_tab()<CR>", opts)
+	vim.keymap.set("n", "<S-Tab>", "<Cmd>lua require('pack.ui').cycle_tab_back()<CR>", opts)
 	vim.keymap.set("n", "x", "<Cmd>lua require('pack.ui').toggle_disabled()<CR>", opts)
 	vim.keymap.set("n", "c", "<Cmd>lua require('pack.async').check_all_outdated()<CR>", opts)
 	vim.keymap.set("n", "u", "<Cmd>lua require('pack.ui').update_one()<CR>", opts)
 	vim.keymap.set("n", "U", "<Cmd>lua require('pack.ui').update_all_outdated()<CR>", opts)
-	vim.keymap.set("n", "/", "<Cmd>lua require('pack.ui').filter()<CR>", opts)
+	vim.keymap.set("n", "f", "<Cmd>lua require('pack.ui').filter()<CR>", opts)
 	vim.keymap.set("n", "1", "<Cmd>lua require('pack.ui').set_tab(1)<CR>", opts)
 	vim.keymap.set("n", "2", "<Cmd>lua require('pack.ui').set_tab(2)<CR>", opts)
 	vim.keymap.set("n", "3", "<Cmd>lua require('pack.ui').set_tab(3)<CR>", opts)

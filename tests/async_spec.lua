@@ -330,12 +330,15 @@ describe("pack.async.run_build_hook", function()
   end)
 
   it("updates plugin status to error when a build hook fails", function()
+    local orig_notify = vim.notify
+    vim.notify = function() end
     local p = fixture_plugin(function() error("build step error") end)
     p.status = "installed"
     local done = false
     async.run_build_hook(p, function() done = true end)
     assert.is_true(vim.wait(500, function() return done end, 10), "build did not finish")
     assert.equals("error", p.status, "failing build hook must update status to error")
+    vim.notify = orig_notify
   end)
 
   it("does not clobber a status set mid-build back to the pre-build placeholder", function()

@@ -80,16 +80,16 @@ function M.show_help()
 		"  Pack Keymaps",
 		"  ============",
 		"",
-		string.format("  %-10s %-18s %s", "KEY", "SCOPE", "DESCRIPTION"),
-		string.format("  %-10s %-18s %s", "---", "-----", "-----------"),
+		string.format("  %-10s %s", "KEY", "DESCRIPTION"),
+		string.format("  %-10s %s", "---", "-----------"),
 	}
 	for _, entry in ipairs(render.KEYMAP_HELP) do
-		table.insert(lines, string.format("  %-10s %-18s %s", entry.key, entry.scope, entry.desc))
+		table.insert(lines, string.format("  %-10s %s", entry.key, entry.desc))
 	end
 	M.open_popup(lines, { close_keys = { "q", "?", "<Esc>" }, width_pct = 0.75 })
 end
 
-function M.show_full_details(p)
+function M.show_full_details(p, current_tab)
 	if not p then
 		return
 	end
@@ -99,46 +99,78 @@ function M.show_full_details(p)
 		table.insert(lines, "  " .. dl)
 	end
 
-	table.insert(lines, "")
-	table.insert(lines, "  Git & Working Tree Status")
-	table.insert(lines, "  -------------------------")
-
-	local commit_line = "(no commit info available)"
-	if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
-		local branch = vim.fn.system({ "git", "-C", p.dir, "rev-parse", "--abbrev-ref", "HEAD" })
-		if vim.v.shell_error == 0 and branch ~= "" then
-			table.insert(lines, "  branch:   " .. vim.trim(branch))
-		end
-
-		local result = vim.fn.system({ "git", "-C", p.dir, "log", "-1", "--format=%h %s (%cr) <%an>" })
-		if vim.v.shell_error == 0 and result ~= "" then
-			commit_line = vim.trim(result)
-		end
-
-		local status_out = vim.fn.system({ "git", "-C", p.dir, "status", "--porcelain" })
-		if vim.v.shell_error == 0 and vim.trim(status_out) ~= "" then
-			table.insert(lines, "  working:  has uncommitted local changes")
-		else
-			table.insert(lines, "  working:  clean")
-		end
-	end
-	table.insert(lines, "  commit:   " .. commit_line)
-
-	if p.behind ~= nil then
-		table.insert(lines, "  behind:   " .. tostring(p.behind) .. " commit(s)")
-	else
-		table.insert(lines, "  behind:   not checked")
-	end
-
-	if p.outdated_error then
-		table.insert(lines, "  check:    " .. tostring(p.outdated_error))
-	end
-
-	if p.pending_commits and #p.pending_commits > 0 then
+	if current_tab == "outdated" then
 		table.insert(lines, "")
-		table.insert(lines, "  Pending Commits (Upstream):")
-		for _, commit in ipairs(p.pending_commits) do
-			table.insert(lines, "    • " .. commit)
+		table.insert(lines, "  Update & Revision Information")
+		table.insert(lines, "  -----------------------------")
+		table.insert(lines, "  status:          " .. (p.status or "installed"))
+		table.insert(lines, "  behind:          " .. tostring(p.behind or 0) .. " commit(s)")
+		table.insert(lines, "  revision before: " .. (p.revision_before or "?"))
+		table.insert(lines, "  revision after:  " .. (p.revision_after or "?"))
+		if p.upstream_branch then
+			table.insert(lines, "  upstream branch: " .. p.upstream_branch)
+		end
+		if p.outdated_error then
+			table.insert(lines, "  check error:     " .. tostring(p.outdated_error))
+		end
+
+		if p.pending_commits and #p.pending_commits > 0 then
+			table.insert(lines, "")
+			table.insert(lines, "  Pending Commits (Upstream):")
+			for _, commit in ipairs(p.pending_commits) do
+				table.insert(lines, "    • " .. commit)
+			end
+		end
+	elseif current_tab == "disabled" then
+		table.insert(lines, "")
+		table.insert(lines, "  Disabled State Information")
+		table.insert(lines, "  --------------------------")
+		table.insert(lines, "  disabled:  true (persisted)")
+		table.insert(lines, "  status:    " .. (p.status or "unknown"))
+		table.insert(lines, "  managed:   " .. tostring(p.managed ~= false))
+		table.insert(lines, "  location:  " .. (p.dir ~= "" and p.dir or "(not on disk)"))
+	else
+		table.insert(lines, "")
+		table.insert(lines, "  Git & Working Tree Status")
+		table.insert(lines, "  -------------------------")
+
+		local commit_line = "(no commit info available)"
+		if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+			local branch = vim.fn.system({ "git", "-C", p.dir, "rev-parse", "--abbrev-ref", "HEAD" })
+			if vim.v.shell_error == 0 and branch ~= "" then
+				table.insert(lines, "  branch:   " .. vim.trim(branch))
+			end
+
+			local result = vim.fn.system({ "git", "-C", p.dir, "log", "-1", "--format=%h %s (%cr) <%an>" })
+			if vim.v.shell_error == 0 and result ~= "" then
+				commit_line = vim.trim(result)
+			end
+
+			local status_out = vim.fn.system({ "git", "-C", p.dir, "status", "--porcelain" })
+			if vim.v.shell_error == 0 and vim.trim(status_out) ~= "" then
+				table.insert(lines, "  working:  has uncommitted local changes")
+			else
+				table.insert(lines, "  working:  clean")
+			end
+		end
+		table.insert(lines, "  commit:   " .. commit_line)
+
+		if p.behind ~= nil then
+			table.insert(lines, "  behind:   " .. tostring(p.behind) .. " commit(s)")
+		else
+			table.insert(lines, "  behind:   not checked")
+		end
+
+		if p.outdated_error then
+			table.insert(lines, "  check:    " .. tostring(p.outdated_error))
+		end
+
+		if p.pending_commits and #p.pending_commits > 0 then
+			table.insert(lines, "")
+			table.insert(lines, "  Pending Commits (Upstream):")
+			for _, commit in ipairs(p.pending_commits) do
+				table.insert(lines, "    • " .. commit)
+			end
 		end
 	end
 

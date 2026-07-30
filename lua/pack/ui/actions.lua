@@ -161,4 +161,87 @@ function M.update_all_outdated(current_tab)
 	require("pack.async").update_plugins(names)
 end
 
+function M.sync_one(get_cursor_plugin_fn, update_ui_cb)
+	local p = get_cursor_plugin_fn()
+	if not p then
+		return
+	end
+	if p.disabled then
+		vim.notify("pack: '" .. p.name .. "' is disabled", vim.log.levels.WARN)
+		return
+	end
+	if p.status == "missing" then
+		local ns = state.to_native_spec(p)
+		if ns then
+			require("pack")._install_and_load({ ns }, false)
+		end
+	else
+		require("pack.async").update_plugin(p)
+	end
+	if update_ui_cb then
+		update_ui_cb()
+	end
+end
+
+function M.delete_one(get_cursor_plugin_fn, clear_select_cb, update_ui_cb)
+	local p = get_cursor_plugin_fn()
+	if not p then
+		return
+	end
+	pcall(function()
+		require("pack.loader").remove_triggers(p)
+	end)
+	state.remove_plugin(p.name)
+	pcall(function()
+		vim.pack.del({ p.name })
+	end)
+	vim.notify("pack: Deleted '" .. p.name .. "' from disk", vim.log.levels.INFO)
+	if clear_select_cb then
+		clear_select_cb()
+	end
+	if update_ui_cb then
+		update_ui_cb()
+	end
+end
+
+function M.delete_all_disabled(clear_select_cb, update_ui_cb)
+	local disabled_plugins = {}
+	for _, p in pairs(state.get_plugins()) do
+		if p.disabled then
+			table.insert(disabled_plugins, p)
+		end
+	end
+
+	if #disabled_plugins == 0 then
+		vim.notify("pack: No disabled plugins found to delete", vim.log.levels.INFO)
+		return
+	end
+
+	local names = {}
+	for _, p in ipairs(disabled_plugins) do
+		table.insert(names, p.name)
+		pcall(function()
+			require("pack.loader").remove_triggers(p)
+		end)
+		state.remove_plugin(p.name)
+	end
+
+	pcall(function()
+		vim.pack.del(names)
+	end)
+
+	if clear_select_cb then
+		clear_select_cb()
+	end
+	if update_ui_cb then
+		update_ui_cb()
+	end
+
+	vim.notify(
+		"Deleted " .. #names .. " disabled plugin(s) from disk. Remember to remove their specs from your Lua config before restarting Neovim.",
+		vim.log.levels.WARN,
+		{ title = "Pack.nvim" }
+	)
+end
+
 return M

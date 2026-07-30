@@ -2,7 +2,7 @@ local state = require("pack.state")
 
 local M = {}
 
-function M.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, matches_search_fn)
+function M.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, matches_search_fn, show_select_ui)
 	local outdated = {}
 	for _, p in pairs(state.get_plugins()) do
 		if not p.disabled then
@@ -25,9 +25,12 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 	table.insert(lines, "  Outdated (" .. #outdated .. ")")
 	table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
 
+	local has_selections = next(selected_plugins) ~= nil
+
 	for _, p in ipairs(outdated) do
 		local is_selected = selected_plugins[p.name] == true
-		local sel_prefix = is_selected and "[✓] " or "[ ] "
+		local render_checkbox = show_select_ui or has_selections or is_selected
+		local sel_prefix = render_checkbox and (is_selected and "[✓] " or "[ ] ") or ""
 		local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
 		local suffix = (p.status == "updating") and "updating…"
 			or (p.status == "building") and "building…"
@@ -39,13 +42,15 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 		plugin_map[#lines] = p
 
 		local col_offset = 4
-		table.insert(highlights, {
-			line = #lines - 1,
-			col_start = col_offset,
-			col_end = col_offset + #sel_prefix,
-			hl = is_selected and "DiagnosticOk" or "Comment",
-		})
-		col_offset = col_offset + #sel_prefix
+		if render_checkbox then
+			table.insert(highlights, {
+				line = #lines - 1,
+				col_start = col_offset,
+				col_end = col_offset + #sel_prefix,
+				hl = is_selected and "DiagnosticOk" or "Comment",
+			})
+			col_offset = col_offset + #sel_prefix
+		end
 
 		table.insert(
 			highlights,
@@ -70,12 +75,23 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 			table.insert(lines, "      Revision after:  " .. (p.revision_after or "?") .. branch_suffix)
 			plugin_map[#lines] = p
 
-			if p.pending_commits and #p.pending_commits > 0 then
+			local commits = p.pending_commits
+			if not commits and p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+				local git_out = vim.fn.system({ "git", "-C", p.dir, "log", "-5", "--format=%h %s (%cr)" })
+				if vim.v.shell_error == 0 and vim.trim(git_out) ~= "" then
+					commits = {}
+					for cl in git_out:gmatch("[^\r\n]+") do
+						table.insert(commits, cl)
+					end
+				end
+			end
+
+			if commits and #commits > 0 then
 				table.insert(lines, "")
 				plugin_map[#lines] = p
 				table.insert(lines, "      Pending updates:")
 				plugin_map[#lines] = p
-				for _, commit in ipairs(p.pending_commits) do
+				for _, commit in ipairs(commits) do
 					table.insert(lines, "      > " .. commit)
 					plugin_map[#lines] = p
 					table.insert(highlights, { line = #lines - 1, col_start = 6, col_end = -1, hl = "Comment" })
@@ -87,7 +103,7 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 	end
 end
 
-function M.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, matches_search_fn, add_details_fn)
+function M.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, matches_search_fn, add_details_fn, show_select_ui)
 	local disabled = {}
 	for _, p in pairs(state.get_plugins()) do
 		if p.disabled then
@@ -107,9 +123,13 @@ function M.render_disabled_tab(lines, highlights, search_term, config_ref, expan
 
 	table.insert(lines, "  Disabled (" .. #disabled .. ")")
 	table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
+
+	local has_selections = next(selected_plugins) ~= nil
+
 	for _, p in ipairs(disabled) do
 		local is_selected = selected_plugins[p.name] == true
-		local sel_prefix = is_selected and "[✓] " or "[ ] "
+		local render_checkbox = show_select_ui or has_selections or is_selected
+		local sel_prefix = render_checkbox and (is_selected and "[✓] " or "[ ] ") or ""
 		local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
 		local tag = (p.managed == false) and "  (native)" or ""
 		local line = string.format("    %s%s %s%s (%s)", sel_prefix, expand_icon, p.name, tag, p.status)
@@ -117,13 +137,15 @@ function M.render_disabled_tab(lines, highlights, search_term, config_ref, expan
 		plugin_map[#lines] = p
 
 		local col_offset = 4
-		table.insert(highlights, {
-			line = #lines - 1,
-			col_start = col_offset,
-			col_end = col_offset + #sel_prefix,
-			hl = is_selected and "DiagnosticOk" or "Comment",
-		})
-		col_offset = col_offset + #sel_prefix
+		if render_checkbox then
+			table.insert(highlights, {
+				line = #lines - 1,
+				col_start = col_offset,
+				col_end = col_offset + #sel_prefix,
+				hl = is_selected and "DiagnosticOk" or "Comment",
+			})
+			col_offset = col_offset + #sel_prefix
+		end
 
 		table.insert(
 			highlights,

@@ -690,7 +690,7 @@ describe("pack.ui", function()
       ui.open(config)
       local buf = vim.api.nvim_get_current_buf()
       local cursor = vim.api.nvim_win_get_cursor(0)
-      local first_plugin_line = find_line(buf, "%[%s*%]")
+      local first_plugin_line = find_line(buf, "foo%.nvim")
       assert.equals(first_plugin_line, cursor[1])
     end)
 
@@ -719,6 +719,195 @@ describe("pack.ui", function()
       ui.update()
       cursor = vim.api.nvim_win_get_cursor(0)
       assert.equals(line_count, cursor[1])
+    end)
+  end)
+
+  describe("refined design plan UI features", function()
+    it("renders tab-tailored centered quick help strings", function()
+      local tabbar = require("pack.ui.render.tabbar")
+      local lines = {}
+      local highlights = {}
+      tabbar.render_quick_help(lines, highlights, "all", 80)
+      assert.equals(1, #lines)
+      assert.truthy(lines[1]:find("%[S%] Sync All"))
+      assert.truthy(lines[1]:find("%[q%] Close"))
+      assert.falsy(lines[1]:find("%[f%] Filter")) -- at width 80, optional items don't fit
+
+      lines = {}
+      highlights = {}
+      tabbar.render_quick_help(lines, highlights, "all", 130)
+      assert.truthy(lines[1]:find("%[S%] Sync All"))
+      assert.truthy(lines[1]:find("%[f%] Filter")) -- at width 130, optional items fit
+
+      lines = {}
+      highlights = {}
+      tabbar.render_quick_help(lines, highlights, "outdated", 80)
+      assert.truthy(lines[1]:find("%[U%] Update All"))
+
+      lines = {}
+      highlights = {}
+      tabbar.render_quick_help(lines, highlights, "disabled", 80)
+      assert.truthy(lines[1]:find("%[D%] Delete All Disabled"))
+    end)
+
+    it("renders dynamic tab count badges in tab pills", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.set_behind("foo.nvim", 2)
+      state.set_disabled("bar.nvim", true)
+
+      local tabbar = require("pack.ui.render.tabbar")
+      local lines = {}
+      local highlights = {}
+      tabbar.render_tab_bar(lines, highlights, "all")
+      assert.truthy(lines[1]:find("%[ ● Plugins %(1%) %]"))
+      assert.truthy(lines[1]:find("%[ ↺ Updates %(1%) %]"))
+      assert.truthy(lines[1]:find("%[ 󰂭 Disabled %(1%) %]"))
+    end)
+
+    it("cycles tabs backwards with cycle_tab_back (S-Tab)", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+      ui.cycle_tab_back() -- from all -> disabled
+      local buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local tab_line = lines[3]
+      assert.truthy(tab_line:find("%[ ● Disabled"))
+    end)
+
+    it("renders outdated sign on Plugins tab when plugin has pending updates", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      state.set_behind("foo.nvim", 2)
+      ui.open(config)
+
+      local buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.truthy(foo_line:find("↺ 2 commits behind"))
+    end)
+
+    it("handles selection UI toggle (v) and clear selection (V)", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      ui.open(config)
+
+      local buf = vim.api.nvim_get_current_buf()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.falsy(foo_line:find("%[%s*%]")) -- hidden by default
+
+      ui.toggle_select_ui() -- toggle checkboxes on
+      lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.truthy(foo_line:find("%[%s*%]")) -- now visible
+
+      ui.toggle_select() -- select item under cursor
+      lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.truthy(foo_line:find("%[✓%]"))
+
+      ui.toggle_select_ui() -- pressing v while items selected clears selections
+      lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.falsy(foo_line:find("%[✓%]"))
+      assert.truthy(foo_line:find("%[%s*%]")) -- selection cleared, checkboxes remain visible
+
+      ui.toggle_select_ui() -- pressing v when no items selected hides checkboxes
+      lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      foo_line = lines[find_line(buf, "foo%.nvim")]
+      assert.falsy(foo_line:find("%[%s*%]")) -- now hidden
+    end)
+
+    it("deletes all disabled plugins with D and shows warning notification", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      state.set_disabled("bar.nvim", true)
+
+      local notifications = {}
+      local orig_notify = vim.notify
+      vim.notify = function(msg, level, opts)
+        table.insert(notifications, { msg = msg, level = level, opts = opts })
+      end
+
+      local deleted_names = {}
+      local orig_del = vim.pack.del
+      vim.pack.del = function(names) deleted_names = names end
+
+      ui.open(config)
+      ui.delete_all_disabled()
+
+      vim.notify = orig_notify
+      vim.pack.del = orig_del
+
+      assert.equals(1, #deleted_names)
+      assert.equals("bar.nvim", deleted_names[1])
+      assert.equals(nil, state.get_plugins()["bar.nvim"])
+      assert.truthy(#notifications > 0)
+      assert.truthy(notifications[#notifications].msg:find("Deleted 1 disabled plugin%(s%) from disk"))
+      assert.equals(vim.log.levels.WARN, notifications[#notifications].level)
+    end)
+
+    it("syncs single cursor plugin with s keymap", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "missing")
+      ui.open(config)
+
+      local installed_specs = {}
+      local pack_mod = require("pack")
+      local orig_inst = pack_mod._install_and_load
+      pack_mod._install_and_load = function(specs, block) installed_specs = specs end
+
+      ui.sync_one()
+      pack_mod._install_and_load = orig_inst
+
+      assert.equals(1, #installed_specs)
+      assert.equals("foo.nvim", installed_specs[1].name)
+    end)
+
+    it("deletes single cursor plugin with d keymap", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      ui.open(config)
+
+      local deleted_names = {}
+      local orig_del = vim.pack.del
+      vim.pack.del = function(names) deleted_names = names end
+
+      ui.delete_one()
+      vim.pack.del = orig_del
+
+      assert.equals(1, #deleted_names)
+      assert.equals("foo.nvim", deleted_names[1])
+      assert.equals(nil, state.get_plugins()["foo.nvim"])
+    end)
+
+    it("displays tab-tailored popup details with K", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.set_disabled("foo.nvim", true)
+      ui.open(config)
+      ui.set_tab(3)
+
+      local popup = require("pack.ui.popup")
+      local opened_lines = nil
+      local orig_open = popup.open_popup
+      popup.open_popup = function(lines, opts)
+        opened_lines = lines
+        return 1, 1
+      end
+
+      ui.show_full_details()
+      popup.open_popup = orig_open
+
+      assert.truthy(opened_lines ~= nil)
+      local full_text = table.concat(opened_lines, "\n")
+      assert.truthy(full_text:find("Disabled State Information"))
     end)
   end)
 end)

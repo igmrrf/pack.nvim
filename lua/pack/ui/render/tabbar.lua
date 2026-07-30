@@ -1,3 +1,5 @@
+local state = require("pack.state")
+
 local M = {}
 
 M.TAB_ORDER = { "all", "outdated", "disabled" }
@@ -7,15 +9,68 @@ M.TAB_LABELS = {
 	disabled = "Disabled",
 }
 
+M.HELP_ITEMS = {
+	all = {
+		base = { "[S] Sync All", "[v] Select", "[Tab] Tabs", "[?] Help", "[q] Close" },
+		optional = { "[s] Sync", "[d] Delete", "[f] Filter" },
+	},
+	outdated = {
+		base = { "[U] Update All", "[Enter] Details", "[Tab] Tabs", "[?] Help", "[q] Close" },
+		optional = { "[u] Update", "[s] Sync", "[d] Delete", "[f] Filter" },
+	},
+	disabled = {
+		base = { "[D] Delete All Disabled", "[v] Select", "[Tab] Tabs", "[?] Help", "[q] Close" },
+		optional = { "[d] Delete", "[f] Filter" },
+	},
+}
+
+function M.get_tab_counts()
+	local plugins = state.get_plugins()
+	local counts = { all = 0, outdated = 0, disabled = 0 }
+	for _, p in pairs(plugins) do
+		if p.disabled then
+			counts.disabled = counts.disabled + 1
+		else
+			counts.all = counts.all + 1
+			if (p.behind and p.behind > 0) or p.status == "updating" or p.status == "building" then
+				counts.outdated = counts.outdated + 1
+			end
+		end
+	end
+	return counts
+end
+
 function M.render_tab_bar(lines, highlights, current_tab)
+	local counts = M.get_tab_counts()
 	local tab_line = "  "
-	for i, tab in ipairs(M.TAB_ORDER) do
+
+	for _, tab in ipairs(M.TAB_ORDER) do
 		local is_active = (tab == current_tab)
-		local label = M.TAB_LABELS[tab] or (tab:sub(1, 1):upper() .. tab:sub(2))
-		local tab_text = string.format(" %d %s ", i, label)
+		local count = counts[tab] or 0
+		local pill_text = ""
+
+		if tab == "all" then
+			if is_active then
+				pill_text = string.format("[ ● Plugins (%d) ]", count)
+			else
+				pill_text = string.format("[ Plugins (%d) ]", count)
+			end
+		elseif tab == "outdated" then
+			if is_active then
+				pill_text = string.format("[ ● Updates (%d) ]", count)
+			else
+				pill_text = string.format("[ ↺ Updates (%d) ]", count)
+			end
+		elseif tab == "disabled" then
+			if is_active then
+				pill_text = string.format("[ ● Disabled (%d) ]", count)
+			else
+				pill_text = string.format("[ 󰂭 Disabled (%d) ]", count)
+			end
+		end
 
 		local start_col = #tab_line
-		tab_line = tab_line .. tab_text
+		tab_line = tab_line .. pill_text
 		local end_col = #tab_line
 
 		if is_active then
@@ -23,24 +78,49 @@ function M.render_tab_bar(lines, highlights, current_tab)
 		else
 			table.insert(highlights, { line = #lines, col_start = start_col, col_end = end_col, hl = "TabLine" })
 		end
-		tab_line = tab_line .. "  "
+		tab_line = tab_line .. "     "
 	end
 
 	table.insert(lines, tab_line)
 	table.insert(lines, "")
 end
 
-M.HEADER_HELP = {
-	all = "  S sync  •  C clean  •  Space select  •  Enter details  •  K info  •  l log  •  / filter  •  ? help  •  q close",
-	outdated = "  c check  •  u update  •  U update all  •  d diff  •  Enter details  •  / filter  •  ? help  •  q close",
-	disabled = "  x enable  •  Space select  •  v clear select  •  Enter details  •  / filter  •  ? help  •  q close",
-}
-M.FOOTER_HELP = M.HEADER_HELP
+function M.render_quick_help(lines, highlights, current_tab, win_width)
+	win_width = win_width or 80
+	local tab_spec = M.HELP_ITEMS[current_tab] or M.HELP_ITEMS.all
+	local active_items = {}
+	for _, item in ipairs(tab_spec.base) do
+		table.insert(active_items, item)
+	end
 
-function M.render_quick_help(lines, highlights, current_tab)
-	local help_text = M.HEADER_HELP[current_tab] or M.HEADER_HELP.all
-	table.insert(lines, help_text)
-	table.insert(highlights, { line = #lines - 1, col_start = 0, col_end = -1, hl = "Comment" })
+	if tab_spec.optional then
+		for _, opt_item in ipairs(tab_spec.optional) do
+			local test_items = {}
+			for _, item in ipairs(active_items) do
+				table.insert(test_items, item)
+			end
+			table.insert(test_items, opt_item)
+			local test_str = table.concat(test_items, "  •  ")
+			local str_w = (vim.api and vim.api.nvim_strwidth) and vim.api.nvim_strwidth(test_str) or #test_str
+			if str_w <= math.max(20, win_width - 4) then
+				active_items = test_items
+			else
+				break
+			end
+		end
+	end
+
+	local help_text = table.concat(active_items, "  •  ")
+	local text_w = (vim.api and vim.api.nvim_strwidth) and vim.api.nvim_strwidth(help_text) or #help_text
+	local pad = math.max(0, math.floor((win_width - text_w) / 2))
+	local centered_text = string.rep(" ", pad) .. help_text
+	table.insert(lines, centered_text)
+	table.insert(highlights, {
+		line = #lines - 1,
+		col_start = pad,
+		col_end = pad + #help_text,
+		hl = "Comment",
+	})
 end
 
 return M

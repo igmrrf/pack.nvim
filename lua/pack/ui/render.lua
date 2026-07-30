@@ -3,25 +3,23 @@ local state = require("pack.state")
 local M = {}
 
 M.KEYMAP_HELP = {
-	{ key = "q", scope = "all", desc = "close dashboard" },
-	{ key = "?", scope = "all", desc = "show this help popup" },
-	{ key = "S", scope = "all", desc = "sync all (install missing, pull updates)" },
-	{ key = "C", scope = "all", desc = "clean unused plugins (no longer in spec)" },
-	{ key = "X", scope = "all", desc = "uninstall cursor/selected plugin from disk" },
-	{ key = "<Space>", scope = "all", desc = "toggle selection for bulk action" },
-	{ key = "v", scope = "all", desc = "clear all selections" },
-	{ key = "Tab", scope = "all", desc = "cycle tabs" },
-	{ key = "1/2/3", scope = "all", desc = "go to tab 1/2/3 directly" },
-	{ key = "Enter", scope = "all", desc = "toggle inline details for plugin" },
-	{ key = "K", scope = "all", desc = "full details (commit info) in popup" },
-	{ key = "l", scope = "all", desc = "view install/update logs" },
-	{ key = "p", scope = "all", desc = "show startup profile (load times & bar chart)" },
-	{ key = "d", scope = "all", desc = "view pending updates diff" },
-	{ key = "x", scope = "Plugins, Disabled", desc = "toggle disable/enable (cursor/selected)" },
-	{ key = "c", scope = "all", desc = "check for outdated plugins" },
-	{ key = "u", scope = "Updates", desc = "update cursor/selected plugin" },
-	{ key = "U", scope = "Updates", desc = "update all outdated plugins" },
-	{ key = "/", scope = "all", desc = "filter plugins (name, cat:category, tag:tag)" },
+	{ key = "?", desc = "show this help popup" },
+	{ key = "q", desc = "close dashboard or popup" },
+	{ key = "Tab / S-Tab", desc = "cycle tabs (Plugins -> Updates -> Disabled)" },
+	{ key = "v", desc = "toggle selection UI / clear selection if items selected" },
+	{ key = "Space", desc = "toggle item selection" },
+	{ key = "S", desc = "sync all plugins (install missing, pull updates)" },
+	{ key = "s", desc = "sync plugin under cursor" },
+	{ key = "U", desc = "update all outdated plugins" },
+	{ key = "u", desc = "update plugin under cursor" },
+	{ key = "d", desc = "delete plugin under cursor from disk" },
+	{ key = "D", desc = "delete all disabled plugins from disk" },
+	{ key = "x", desc = "toggle disable/enable plugin under cursor" },
+	{ key = "Enter", desc = "toggle inline details (on Updates tab: info & commits)" },
+	{ key = "K", desc = "full details in popup (tailored per tab)" },
+	{ key = "p", desc = "show startup profile" },
+	{ key = "f", desc = "filter plugins (name, cat:category, tag:tag)" },
+	{ key = "/", desc = "search buffer (standard Neovim search)" },
 }
 
 function M.inspect_oneline(value)
@@ -136,7 +134,7 @@ function M.matches_search(p, term)
 	return false
 end
 
-function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	local plugins = state.get_plugins()
 	local groups =
 		{ loaded = {}, installed = {}, missing = {}, installing = {}, updating = {}, building = {}, error = {} }
@@ -158,6 +156,8 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 			return a.name < b.name
 		end)
 	end
+
+	local has_selections = next(selected_plugins) ~= nil
 
 	local function render_group(name, list, icon, hl_group)
 		if #list > 0 then
@@ -181,7 +181,8 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 			table.insert(highlights, { line = #lines - 1, col_start = 2, col_end = -1, hl = "Title" })
 			for _, p in ipairs(list) do
 				local is_selected = selected_plugins[p.name] == true
-				local sel_prefix = is_selected and "[✓] " or "[ ] "
+				local render_checkbox = show_select_ui or has_selections or is_selected
+				local sel_prefix = render_checkbox and (is_selected and "[✓] " or "[ ] ") or ""
 				local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
 				local time_str = ""
 				if p.load_time then
@@ -191,19 +192,25 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 						time_str = string.format(" (%.1fms)", p.load_time)
 					end
 				end
+				local outdated_sign = ""
+				if p.behind and p.behind > 0 then
+					outdated_sign = string.format("  ↺ %d commit%s behind", p.behind, p.behind > 1 and "s" or "")
+				end
 				local tag = (p.managed == false) and "  (native)" or ""
-				local line = string.format("    %s%s %s %s%s%s", sel_prefix, expand_icon, icon, p.name, time_str, tag)
+				local line = string.format("    %s%s %s %s%s%s%s", sel_prefix, expand_icon, icon, p.name, time_str, outdated_sign, tag)
 				table.insert(lines, line)
 				plugin_map[#lines] = p
 
 				local col_offset = 4
-				table.insert(highlights, {
-					line = #lines - 1,
-					col_start = col_offset,
-					col_end = col_offset + #sel_prefix,
-					hl = is_selected and "DiagnosticOk" or "Comment",
-				})
-				col_offset = col_offset + #sel_prefix
+				if render_checkbox then
+					table.insert(highlights, {
+						line = #lines - 1,
+						col_start = col_offset,
+						col_end = col_offset + #sel_prefix,
+						hl = is_selected and "DiagnosticOk" or "Comment",
+					})
+					col_offset = col_offset + #sel_prefix
+				end
 
 				table.insert(highlights, {
 					line = #lines - 1,
@@ -225,11 +232,18 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 						{ line = #lines - 1, col_start = name_end, col_end = name_end + #time_str, hl = "Comment" }
 					)
 				end
-				if p.managed == false then
-					local tag_start = name_end + #time_str
+				local curr_pos = name_end + #time_str
+				if outdated_sign ~= "" then
 					table.insert(
 						highlights,
-						{ line = #lines - 1, col_start = tag_start, col_end = tag_start + #tag, hl = "Comment" }
+						{ line = #lines - 1, col_start = curr_pos, col_end = curr_pos + #outdated_sign, hl = "DiagnosticWarn" }
+					)
+					curr_pos = curr_pos + #outdated_sign
+				end
+				if p.managed == false then
+					table.insert(
+						highlights,
+						{ line = #lines - 1, col_start = curr_pos, col_end = curr_pos + #tag, hl = "Comment" }
 					)
 				end
 
@@ -250,7 +264,7 @@ end
 
 local tabs_mod = require("pack.ui.render.tabs")
 
-function M.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+function M.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	return tabs_mod.render_outdated_tab(
 		lines,
 		highlights,
@@ -259,11 +273,12 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 		expanded_plugins,
 		selected_plugins,
 		plugin_map,
-		M.matches_search
+		M.matches_search,
+		show_select_ui
 	)
 end
 
-function M.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+function M.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	return tabs_mod.render_disabled_tab(
 		lines,
 		highlights,
@@ -273,7 +288,8 @@ function M.render_disabled_tab(lines, highlights, search_term, config_ref, expan
 		selected_plugins,
 		plugin_map,
 		M.matches_search,
-		M.add_plugin_details
+		M.add_plugin_details,
+		show_select_ui
 	)
 end
 

@@ -2,6 +2,7 @@ local state = require("pack.state")
 local render = require("pack.ui.render")
 local popup = require("pack.ui.popup")
 local spinner_mod = require("pack.ui.spinner")
+local actions_mod = require("pack.ui.actions")
 
 local M = {}
 
@@ -16,6 +17,7 @@ local initial_focus = false
 local selected_plugins = {}
 local current_tab = "all"
 local search_term = ""
+local show_select_ui = false
 
 local tabbar_mod = require("pack.ui.render.tabbar")
 local TAB_ORDER = tabbar_mod.TAB_ORDER
@@ -35,8 +37,26 @@ local function next_tab(tab)
 	return TAB_ORDER[1]
 end
 
+local function prev_tab(tab)
+	for i, t in ipairs(TAB_ORDER) do
+		if t == tab then
+			local prev_idx = i - 1
+			if prev_idx < 1 then
+				prev_idx = #TAB_ORDER
+			end
+			return TAB_ORDER[prev_idx]
+		end
+	end
+	return TAB_ORDER[#TAB_ORDER]
+end
+
 function M.cycle_tab()
 	current_tab = next_tab(current_tab)
+	M.update({ jump_to_first = true })
+end
+
+function M.cycle_tab_back()
+	current_tab = prev_tab(current_tab)
 	M.update({ jump_to_first = true })
 end
 
@@ -93,7 +113,7 @@ end
 
 function M.show_full_details()
 	local p = plugin_at_cursor()
-	return popup.show_full_details(p)
+	return popup.show_full_details(p, current_tab)
 end
 
 function M.show_log()
@@ -105,6 +125,14 @@ function M.update_log()
 	return popup.update_log()
 end
 
+function M.sync_one()
+	return actions_mod.sync_one(plugin_at_cursor, M.update)
+end
+
+function M.delete_one()
+	return actions_mod.delete_one(plugin_at_cursor, function() selected_plugins = {} end, M.update)
+end
+
 function M.toggle_select()
 	local p = plugin_at_cursor()
 	if not p then
@@ -114,6 +142,17 @@ function M.toggle_select()
 		selected_plugins[p.name] = nil
 	else
 		selected_plugins[p.name] = true
+		show_select_ui = true
+	end
+	M.update()
+end
+
+function M.toggle_select_ui()
+	if next(selected_plugins) ~= nil then
+		selected_plugins = {}
+		show_select_ui = true
+	else
+		show_select_ui = not show_select_ui
 	end
 	M.update()
 end
@@ -123,14 +162,16 @@ function M.clear_select()
 	M.update()
 end
 
-local actions_mod = require("pack.ui.actions")
-
 function M.clean()
 	return actions_mod.clean(M.update)
 end
 
 function M.uninstall()
 	return actions_mod.uninstall(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
+end
+
+function M.delete_all_disabled()
+	return actions_mod.delete_all_disabled(function() selected_plugins = {} end, M.update)
 end
 
 function M.toggle_details()
@@ -159,6 +200,7 @@ function M.open(config)
 	config_ref = config
 	search_term = ""
 	selected_plugins = {}
+	show_select_ui = false
 	pcall(function()
 		state.reconcile_from_native(require("pack").native_pack)
 	end)
@@ -205,7 +247,7 @@ function M.update(opts)
 		win_width = vim.api.nvim_win_get_width(win_id)
 	end
 
-	tabbar_mod.render_quick_help(lines, highlights, current_tab)
+	tabbar_mod.render_quick_help(lines, highlights, current_tab, win_width)
 
 	local status_line, is_active, status_pad = spinner_mod.get_status_line(win_width)
 	if is_active then
@@ -218,11 +260,11 @@ function M.update(opts)
 	tabbar_mod.render_tab_bar(lines, highlights, current_tab)
 
 	if current_tab == "all" then
-		render.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+		render.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	elseif current_tab == "outdated" then
-		render.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+		render.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	else
-		render.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map)
+		render.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
 	end
 
 	vim.bo[buf_id].modifiable = true
