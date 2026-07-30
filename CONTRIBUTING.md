@@ -22,7 +22,7 @@ Thank you for your interest in contributing to `pack.nvim`! We welcome bug repor
    ```
 
 2. **Test Environment Requirements**:
-   - **Neovim**: `>= 0.10.0` (with native `vim.pack` support)
+   - **Neovim**: `>= 0.12.0` (with native `vim.pack` support)
    - **Git**: `>= 2.30.0`
    - **Plenary.nvim**: Required for running the test suite (automatically handled by the test harness).
 

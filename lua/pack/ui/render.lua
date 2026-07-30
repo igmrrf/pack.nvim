@@ -16,7 +16,7 @@ M.KEYMAP_HELP = {
 	{ key = "d", desc = "delete plugin under cursor from disk" },
 	{ key = "D", desc = "delete all disabled plugins from disk" },
 	{ key = "x", desc = "toggle disable/enable plugin under cursor" },
-	{ key = "Enter", desc = "toggle inline details (on Updates tab: info & commits)" },
+	{ key = "<CR>", desc = "toggle inline details (on Updates tab: info & commits)" },
 	{ key = "K", desc = "full details in popup (tailored per tab)" },
 	{ key = "p", desc = "show startup profile" },
 	{ key = "f", desc = "filter plugins (name, cat:category, tag:tag)" },
@@ -135,7 +135,16 @@ function M.matches_search(p, term)
 	return false
 end
 
-function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+function M.render_all_tab(
+	lines,
+	highlights,
+	search_term,
+	config_ref,
+	expanded_plugins,
+	selected_plugins,
+	plugin_map,
+	show_select_ui
+)
 	local plugins = state.get_plugins()
 	local groups =
 		{ loaded = {}, installed = {}, missing = {}, installing = {}, updating = {}, building = {}, error = {} }
@@ -198,7 +207,16 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 					outdated_sign = string.format("  ↺ %d commit%s behind", p.behind, p.behind > 1 and "s" or "")
 				end
 				local tag = (p.managed == false) and "  (native)" or ""
-				local line = string.format("    %s%s %s %s%s%s%s", sel_prefix, expand_icon, icon, p.name, time_str, outdated_sign, tag)
+				local line = string.format(
+					"    %s%s %s %s%s%s%s",
+					sel_prefix,
+					expand_icon,
+					icon,
+					p.name,
+					time_str,
+					outdated_sign,
+					tag
+				)
 				table.insert(lines, line)
 				plugin_map[#lines] = p
 
@@ -237,7 +255,12 @@ function M.render_all_tab(lines, highlights, search_term, config_ref, expanded_p
 				if outdated_sign ~= "" then
 					table.insert(
 						highlights,
-						{ line = #lines - 1, col_start = curr_pos, col_end = curr_pos + #outdated_sign, hl = "DiagnosticWarn" }
+						{
+							line = #lines - 1,
+							col_start = curr_pos,
+							col_end = curr_pos + #outdated_sign,
+							hl = "DiagnosticWarn",
+						}
 					)
 					curr_pos = curr_pos + #outdated_sign
 				end
@@ -265,7 +288,16 @@ end
 
 local tabs_mod = require("pack.ui.render.tabs")
 
-function M.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+function M.render_outdated_tab(
+	lines,
+	highlights,
+	search_term,
+	config_ref,
+	expanded_plugins,
+	selected_plugins,
+	plugin_map,
+	show_select_ui
+)
 	return tabs_mod.render_outdated_tab(
 		lines,
 		highlights,
@@ -279,7 +311,16 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 	)
 end
 
-function M.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+function M.render_disabled_tab(
+	lines,
+	highlights,
+	search_term,
+	config_ref,
+	expanded_plugins,
+	selected_plugins,
+	plugin_map,
+	show_select_ui
+)
 	return tabs_mod.render_disabled_tab(
 		lines,
 		highlights,

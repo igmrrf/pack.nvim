@@ -25,11 +25,12 @@ To use pack.nvim, you must have Neovim 0.12+ which includes |vim.pack|.
 
 Initialize pack.nvim in your init.lua:
 >lua
-    require("pack").add({
-      { "nvim-lua/plenary.nvim" },
-      { "nvim-telescope/telescope.nvim", lazy = true, cmd = "Telescope" },
-    }, {
-      ui = { border = "rounded" }
+    require("pack").setup({
+      ui = { border = "rounded" },
+      plugins = {
+        { "nvim-lua/plenary.nvim" },
+        { "nvim-telescope/telescope.nvim", lazy = true, cmd = "Telescope" },
+      },
     })
 <
 
@@ -54,13 +55,23 @@ In the dashboard, you can use the following default mappings:
     `q`        - Close dashboard
     `<CR>`     - Toggle plugin details inline
     `K`        - Show full plugin details (commit info)
-    `<Tab>`    - Cycle through tabs (All, Outdated, Disabled)
+    `<Tab>`    - Cycle through tabs (Plugins -> Updates -> Disabled)
+    `<S-Tab>`  - Cycle through tabs backward
+    `1`/`2`/`3` - Jump directly to tab 1, 2, or 3
+    `<Space>`  - Toggle selection on cursor plugin
+    `v`        - Toggle selection UI mode / clear selection
+    `S`        - Sync all plugins
+    `s`        - Sync plugin under cursor
+    `C`        - Clean unmanaged plugin directories
+    `d`        - Delete plugin under cursor from disk
+    `D`        - Delete all disabled plugins from disk
     `x`        - Toggle disable/enable on the cursor plugin
-    `u`        - Update cursor plugin (in Outdated tab)
+    `c`        - Check for outdated plugins
+    `u`        - Update cursor or selected plugin
     `U`        - Update all outdated plugins
-    `d`        - View pending updates diff
-    `l`        - View logs
-    `/`        - Filter plugins by name, cat:category, tag:tag
+    `l`        - View logs for plugin under cursor
+    `p`        - View startup load time profile
+    `f`        - Filter plugins by name, cat:category, tag:tag
 
 Each tab also displays a contextual quick help bar at the bottom.
 

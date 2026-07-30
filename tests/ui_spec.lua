@@ -731,13 +731,13 @@ describe("pack.ui", function()
       assert.equals(1, #lines)
       assert.truthy(lines[1]:find("%[S%] Sync All"))
       assert.truthy(lines[1]:find("%[%?%] Help"))
-      assert.falsy(lines[1]:find("%[f%] Filter")) -- at width 80, optional items don't fit
+      assert.falsy(lines[1]:find("%[d%] Delete")) -- at width 80, second optional item doesn't fit
 
       lines = {}
       highlights = {}
       tabbar.render_quick_help(lines, highlights, "all", 130)
       assert.truthy(lines[1]:find("%[S%] Sync All"))
-      assert.truthy(lines[1]:find("%[f%] Filter")) -- at width 130, optional items fit
+      assert.truthy(lines[1]:find("%[d%] Delete")) -- at width 130, optional items fit
 
       lines = {}
       highlights = {}

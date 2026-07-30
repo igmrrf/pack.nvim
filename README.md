@@ -47,6 +47,8 @@ require("pack").setup({
   },
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
+    auto_open = true,  -- Automatically open dashboard float when uninstalled plugins exist
+    silent = nil,      -- Silences native vim.pack cmdline messages (defaults to auto_open setting)
     filter = "default", -- Options: "default" (vim.ui.input), "input" (vim.fn.input), or fun(opts, cb)
     icons = {
       loaded = "●",
@@ -118,7 +120,9 @@ Plugin specifications can be defined as shorthand strings (`"owner/repo"`), tabl
 | `cmd` | `string\|table` | User command(s) that trigger lazy loading. |
 | `ft` | `string\|table` | Filetype(s) that trigger lazy loading. |
 | `event` | `string\|table` | Autocmd event(s) or pattern(s) that trigger lazy loading (e.g. `"BufReadPre"`). |
+| `pattern` | `string\|table` | Pattern filter string or table for autocmd `event` lazy triggers. |
 | `keys` | `string\|table` | Keymap shortcut(s) that trigger lazy loading or register keybindings. |
+| `module` | `string` | Custom module name for `require()` trigger tracking. |
 | `dependencies` | `table` | List of dependent plugin specs loaded prior to this plugin. |
 | `init` | `fun(plugin)` | Callback executed BEFORE the plugin is loaded (useful for setting `vim.g` options). |
 | `opts` | `table` | Options table automatically passed to `require(main).setup(opts)`. |
@@ -192,20 +196,25 @@ Subcommands with a `<name>` argument tab-complete against your configured plugin
 
 When inside the dashboard (opened via `:Pack`), you can use the following keymaps:
 
-*   `q` - Close the dashboard or any popup.
-*   `?` - Show the full keymap help popup.
-*   `S` - Start a Sync operation (install/update).
-*   `Tab` (or `1`/`2`/`3`) - Cycle tabs: All -> Outdated -> Disabled.
-*   `<Enter>` - Quick details for the plugin under the cursor.
-*   `K` - Full details (includes branch, working tree status, and current commit) for the plugin under the cursor.
-*   `l` - Show git output logs for the plugin under the cursor.
-*   `p` - Show the startup profile with visual bar chart.
-*   `d` - View pending updates diff for outdated plugins.
-*   `x` - Toggle disable/enable for the plugin under the cursor (All and Disabled tabs). An already-loaded plugin needs a restart to fully unload.
-*   `c` - Check for outdated plugins (concurrency-limited `git fetch`, skipping any checked within the last few minutes).
-*   `u` - Update the plugin under the cursor (Outdated tab).
-*   `U` - Update every outdated plugin (Outdated tab).
-*   `/` - Filter the dashboard by plugin name, category (`/cat:lsp`), or tag (`/tag:ui`).
+*   `q` - Close the dashboard or any popup window.
+*   `?` - Show the interactive keymap help popup.
+*   `S` - Sync all managed plugins (install missing & pull updates).
+*   `s` - Sync the single plugin under the cursor.
+*   `C` - Clean unmanaged/deleted plugin directories.
+*   `Tab` / `Shift-Tab` (or `1`/`2`/`3`) - Cycle or jump directly across dashboard tabs (Plugins -> Updates -> Disabled).
+*   `<Space>` - Toggle selection state for the plugin under the cursor.
+*   `v` - Toggle selection UI mode or clear active selections.
+*   `<CR>` - Toggle inline plugin details expansion.
+*   `K` - Open full detail popup tailored to the current tab (branch, HEAD commit, revision info).
+*   `l` - Show streaming git output logs for the plugin under the cursor.
+*   `p` - Display the startup load time profiling chart (`:Pack profile`).
+*   `d` - Delete the plugin under the cursor from disk.
+*   `D` - Delete all disabled plugins from disk.
+*   `x` - Toggle disable/enable for the plugin under the cursor. An already-loaded plugin requires a Neovim restart to fully unload.
+*   `c` - Check for outdated plugins (concurrency-limited `git fetch`).
+*   `u` - Update the selected or cursor plugin.
+*   `U` - Update all outdated plugins.
+*   `f` - Filter the dashboard by plugin name, category (`cat:lsp`), or tag (`tag:ui`).
 
 *Each tab also renders a contextual quick-help bar at the bottom with tab-relevant action shortcuts.*
 

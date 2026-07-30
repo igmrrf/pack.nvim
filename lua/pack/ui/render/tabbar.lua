@@ -15,7 +15,7 @@ M.HELP_ITEMS = {
 		optional = { "[s] Sync", "[d] Delete" },
 	},
 	outdated = {
-		base = { "[U] Update All", "[Enter] Details", "[Tab] Tabs", "[?] Help" },
+		base = { "[U] Update All", "[<CR>] Details", "[Tab] Tabs", "[?] Help" },
 		optional = { "[c] Check", "[u] Update" },
 	},
 	disabled = {
