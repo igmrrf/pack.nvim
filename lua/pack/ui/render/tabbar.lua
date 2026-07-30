@@ -11,16 +11,16 @@ M.TAB_LABELS = {
 
 M.HELP_ITEMS = {
 	all = {
-		base = { "[S] Sync All", "[v] Select", "[Tab] Tabs", "[?] Help", "[q] Close" },
-		optional = { "[s] Sync", "[d] Delete", "[f] Filter" },
+		base = { "[S] Sync All", "[v] Select", "[Tab] Tabs", "[?] Help" },
+		optional = { "[s] Sync", "[d] Delete" },
 	},
 	outdated = {
-		base = { "[U] Update All", "[Enter] Details", "[Tab] Tabs", "[?] Help", "[q] Close" },
-		optional = { "[u] Update", "[s] Sync", "[d] Delete", "[f] Filter" },
+		base = { "[U] Update All", "[Enter] Details", "[Tab] Tabs", "[?] Help" },
+		optional = { "[c] Check", "[u] Update" },
 	},
 	disabled = {
-		base = { "[D] Delete All Disabled", "[v] Select", "[Tab] Tabs", "[?] Help", "[q] Close" },
-		optional = { "[d] Delete", "[f] Filter" },
+		base = { "[D] Delete All Disabled", "[v] Select", "[Tab] Tabs", "[?] Help" },
+		optional = { "[d] Delete" },
 	},
 }
 
@@ -51,21 +51,21 @@ function M.render_tab_bar(lines, highlights, current_tab)
 
 		if tab == "all" then
 			if is_active then
-				pill_text = string.format("[ ● Plugins (%d) ]", count)
+				pill_text = string.format(" ● Plugins (%d) ", count)
 			else
-				pill_text = string.format("[ Plugins (%d) ]", count)
+				pill_text = string.format("  Plugins (%d) ", count)
 			end
 		elseif tab == "outdated" then
 			if is_active then
-				pill_text = string.format("[ ● Updates (%d) ]", count)
+				pill_text = string.format(" ● Updates (%d) ", count)
 			else
-				pill_text = string.format("[ ↺ Updates (%d) ]", count)
+				pill_text = string.format(" ↺ Updates (%d) ", count)
 			end
 		elseif tab == "disabled" then
 			if is_active then
-				pill_text = string.format("[ ● Disabled (%d) ]", count)
+				pill_text = string.format(" ● Disabled (%d) ", count)
 			else
-				pill_text = string.format("[ 󰂭 Disabled (%d) ]", count)
+				pill_text = string.format(" 󰂭 Disabled (%d) ", count)
 			end
 		end
 

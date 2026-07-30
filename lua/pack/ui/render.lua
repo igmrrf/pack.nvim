@@ -10,6 +10,7 @@ M.KEYMAP_HELP = {
 	{ key = "Space", desc = "toggle item selection" },
 	{ key = "S", desc = "sync all plugins (install missing, pull updates)" },
 	{ key = "s", desc = "sync plugin under cursor" },
+	{ key = "c", desc = "check for outdated plugins" },
 	{ key = "U", desc = "update all outdated plugins" },
 	{ key = "u", desc = "update plugin under cursor" },
 	{ key = "d", desc = "delete plugin under cursor from disk" },

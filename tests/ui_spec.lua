@@ -746,8 +746,29 @@ describe("pack.ui", function()
 
       lines = {}
       highlights = {}
+      tabbar.render_quick_help(lines, highlights, "outdated", 130)
+      assert.truthy(lines[1]:find("%[c%] Check"))
+
+      lines = {}
+      highlights = {}
       tabbar.render_quick_help(lines, highlights, "disabled", 80)
       assert.truthy(lines[1]:find("%[D%] Delete All Disabled"))
+    end)
+
+    it("auto-checks for updates when switching to the outdated tab", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      ui.open(config)
+
+      local checked = false
+      local async = require("pack.async")
+      local orig_check = async.check_all_outdated
+      async.check_all_outdated = function() checked = true end
+
+      ui.set_tab(2) -- switch to outdated tab
+      async.check_all_outdated = orig_check
+
+      assert.is_true(checked)
     end)
 
     it("renders dynamic tab count badges in tab pills", function()
@@ -760,9 +781,9 @@ describe("pack.ui", function()
       local lines = {}
       local highlights = {}
       tabbar.render_tab_bar(lines, highlights, "all")
-      assert.truthy(lines[1]:find("%[ ● Plugins %(1%) %]"))
-      assert.truthy(lines[1]:find("%[ ↺ Updates %(1%) %]"))
-      assert.truthy(lines[1]:find("%[ 󰂭 Disabled %(1%) %]"))
+      assert.truthy(lines[1]:find("● Plugins %(1%)"))
+      assert.truthy(lines[1]:find("↺ Updates %(1%)"))
+      assert.truthy(lines[1]:find("󰂭 Disabled %(1%)"))
     end)
 
     it("cycles tabs backwards with cycle_tab_back (S-Tab)", function()
@@ -773,7 +794,7 @@ describe("pack.ui", function()
       local buf = vim.api.nvim_get_current_buf()
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local tab_line = lines[3]
-      assert.truthy(tab_line:find("%[ ● Disabled"))
+      assert.truthy(tab_line:find("● Disabled"))
     end)
 
     it("renders outdated sign on Plugins tab when plugin has pending updates", function()

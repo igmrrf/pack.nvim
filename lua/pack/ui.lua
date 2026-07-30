@@ -50,19 +50,28 @@ local function prev_tab(tab)
 	return TAB_ORDER[#TAB_ORDER]
 end
 
+local function on_tab_change()
+	if current_tab == "outdated" then
+		require("pack.async").check_all_outdated()
+	end
+end
+
 function M.cycle_tab()
 	current_tab = next_tab(current_tab)
+	on_tab_change()
 	M.update({ jump_to_first = true })
 end
 
 function M.cycle_tab_back()
 	current_tab = prev_tab(current_tab)
+	on_tab_change()
 	M.update({ jump_to_first = true })
 end
 
 function M.set_tab(index)
 	if TAB_ORDER[index] then
 		current_tab = TAB_ORDER[index]
+		on_tab_change()
 		M.update({ jump_to_first = true })
 	end
 end
