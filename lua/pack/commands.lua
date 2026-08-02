@@ -116,6 +116,8 @@ function M.setup_user_command(pack_module)
 			ui.show_profile()
 		elseif subcmd == "diff" then
 			require("pack.async").show_diff()
+		elseif subcmd == "picker" then
+			pack_module.picker()
 		else
 			ui.open(pack_module.config)
 		end
@@ -131,8 +133,19 @@ function M.setup_user_command(pack_module)
 			end
 
 			if #args <= 2 then
-				local subcommands =
-					{ "sync", "clean", "restore", "repair", "profile", "diff", "update", "build", "load", "delete" }
+				local subcommands = {
+					"sync",
+					"clean",
+					"restore",
+					"repair",
+					"profile",
+					"diff",
+					"picker",
+					"update",
+					"build",
+					"load",
+					"delete",
+				}
 				local matches = {}
 				for _, cmd in ipairs(subcommands) do
 					if cmd:find("^" .. vim.pesc(ArgLead)) then

@@ -145,6 +145,7 @@ COMMANDS                                                         *pack-commands*
     :Pack delete <name> Delete plugin via native vim.pack.
     :Pack profile     Show startup profile load time chart.
     :Pack diff        Show pending updates diff for outdated plugins.
+    :Pack picker      Open plugin picker (snacks.picker / vim.ui.select).
 
 ==============================================================================
 DASHBOARD KEYMAPS                                                 *pack-keymaps*
@@ -189,6 +190,24 @@ require("pack").map_keys(keys)
 
 require("pack.state").set_disabled(name, disabled)
     Programmatically toggle the disabled state of a plugin by name.
+
+require("pack").status()
+    Return `{ total = <num>, loaded = <num>, disabled = <num> }`.
+
+require("pack").stats()
+    Return formatted status string (e.g. "📦 12/45 loaded").
+
+require("pack").picker()
+    Open interactive plugin picker (snacks.picker or vim.ui.select fallback).
+
+LUALINE EXTENSION                                                *pack-lualine*
+
+pack.nvim includes a built-in lualine.nvim extension:
+>lua
+    require("lualine").setup({
+      extensions = { "pack" },
+    })
+<
 
 ==============================================================================
 KNOWN LIMITATIONS                                            *pack-limitations*

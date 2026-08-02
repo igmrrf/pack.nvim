@@ -1,6 +1,23 @@
 local M = {}
 
+local function setup_highlights()
+	local hls = {
+		PackHeader = { link = "Title", default = true },
+		PackPluginName = { link = "Function", default = true },
+		PackStatusOk = { link = "DiagnosticOk", default = true },
+		PackStatusUpdate = { link = "DiagnosticWarn", default = true },
+		PackStatusError = { link = "DiagnosticError", default = true },
+		PackBorder = { link = "FloatBorder", default = true },
+		PackTabActive = { link = "TabLineSel", default = true },
+		PackTabInactive = { link = "TabLine", default = true },
+	}
+	for name, opts in pairs(hls) do
+		vim.api.nvim_set_hl(0, name, opts)
+	end
+end
+
 function M.create_window(config, update_ui_cb)
+	setup_highlights()
 	local buf_id = vim.api.nvim_create_buf(false, true)
 	vim.bo[buf_id].bufhidden = "wipe"
 	vim.bo[buf_id].buftype = "nofile"

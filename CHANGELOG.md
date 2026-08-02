@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Non-interactive sync API and live log streaming.
 - Auto-positioning of the cursor on the first plugin when opening the dashboard.
 - Enhanced UX with auto-switching details and auto-closing on specific actions.
+- `pack.status()`, `pack.stats()`, and `pack.picker()` APIs.
+- `:Pack picker` subcommand for quick navigation to plugin directories via `snacks.picker` or `vim.ui.select`.
+- Built-in Lualine statusline extension (`lualine/extensions/pack.lua`).
+- Default custom highlight groups (`PackHeader`, `PackPluginName`, `PackStatusOk`, etc.).
 
 ### Changed
 - Refactored the entire codebase into focused, modular submodules.

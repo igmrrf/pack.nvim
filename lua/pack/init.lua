@@ -142,7 +142,8 @@ function M._install_and_load(native_specs, confirm)
 		if #installed_specs > 0 then
 			local chunks = chunk_array(installed_specs, 10)
 			for _, chunk in ipairs(chunks) do
-				local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+				local ok, err =
+					pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
 				if not ok then
 					vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 				end
@@ -160,7 +161,8 @@ function M._install_and_load(native_specs, confirm)
 
 				local chunks = chunk_array(missing_specs, 10)
 				for _, chunk in ipairs(chunks) do
-					local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+					local ok, err =
+						pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
 					if not ok then
 						vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 					end
@@ -347,6 +349,118 @@ function M.setup(opts)
 	M._install_and_load(collect_native_specs(state.get_plugins()), false)
 
 	require("pack.commands").setup_user_command(M)
+end
+
+function M.status()
+	pcall(function()
+		state.reconcile_from_native(M.native_pack)
+	end)
+
+	local rtp = nil
+	local function get_rtp()
+		if not rtp then
+			rtp = {}
+			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+				rtp[vim.fs.normalize(path)] = true
+			end
+		end
+		return rtp
+	end
+
+	local plugins = state.get_plugins()
+	local total = 0
+	local loaded = 0
+	local disabled = 0
+
+	for _, p in pairs(plugins) do
+		total = total + 1
+		local is_loaded = (p.status == "loaded")
+			or (p.dir and p.dir ~= "" and get_rtp()[vim.fs.normalize(p.dir)] == true)
+		if is_loaded then
+			loaded = loaded + 1
+		end
+		if p.enabled == false or p.disabled or p.status == "disabled" then
+			disabled = disabled + 1
+		end
+	end
+
+	return {
+		total = total,
+		loaded = loaded,
+		disabled = disabled,
+	}
+end
+
+function M.stats()
+	local st = M.status()
+	return string.format("📦 %d/%d loaded", st.loaded, st.total)
+end
+
+function M.picker()
+	pcall(function()
+		state.reconcile_from_native(M.native_pack)
+	end)
+
+	local rtp = nil
+	local function get_rtp()
+		if not rtp then
+			rtp = {}
+			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+				rtp[vim.fs.normalize(path)] = true
+			end
+		end
+		return rtp
+	end
+
+	local ok, snacks = pcall(require, "snacks")
+	local plugins = state.get_plugins()
+	local items = {}
+
+	for name, p in pairs(plugins) do
+		local is_loaded = (p.status == "loaded")
+			or (p.dir and p.dir ~= "" and get_rtp()[vim.fs.normalize(p.dir)] == true)
+		table.insert(items, {
+			text = name .. " (" .. (is_loaded and "loaded" or "opt") .. ")",
+			name = name,
+			plugin = p,
+			dir = p.dir,
+			url = p.url,
+			is_loaded = is_loaded,
+		})
+	end
+
+	table.sort(items, function(a, b)
+		return a.name < b.name
+	end)
+
+	if ok and snacks.picker then
+		snacks.picker.pick({
+			title = "📦 Pack Plugins",
+			items = items,
+			format = function(item)
+				local icon = item.is_loaded and "●" or "○"
+				local hl = item.is_loaded and "PackStatusOk" or "Comment"
+				return { { icon .. " ", hl }, { item.name, "PackPluginName" } }
+			end,
+			confirm = function(picker_win, item)
+				picker_win:close()
+				if item and item.dir then
+					vim.cmd("edit " .. vim.fn.fnameescape(item.dir))
+				end
+			end,
+		})
+	else
+		vim.ui.select(items, {
+			prompt = "📦 Select Pack Plugin:",
+			format_item = function(item)
+				return (item.is_loaded and "● " or "○ ") .. item.name
+			end,
+		}, function(choice)
+			if choice and choice.dir then
+				vim.cmd("edit " .. vim.fn.fnameescape(choice.dir))
+			end
+		end)
+	end
 end
 
 return M

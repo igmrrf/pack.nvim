@@ -149,7 +149,19 @@ pack.nvim exposes programmatic Lua helper functions for configuration and key ma
   })
   ```
 * **`require("pack.state").set_disabled(name, disabled)`**: Programmatically enables or disables a plugin and persists state to `nvim-pack-extra.json`.
+* **`require("pack").status()`**: Returns a table containing `{ total = <number>, loaded = <number>, disabled = <number> }`.
+* **`require("pack").stats()`**: Returns a formatted status summary string (e.g. `"📦 12/45 loaded"`).
+* **`require("pack").picker()`**: Displays an interactive plugin selector using `snacks.picker` (or `vim.ui.select` fallback) to navigate directly to plugin directories.
 
+### 🎨 Lualine Integration
+
+pack.nvim includes a built-in extension for [lualine.nvim](https://github.com/nvim-lualine/lualine.nvim):
+
+```lua
+require("lualine").setup({
+  extensions = { "pack" },
+})
+```
 
 ## ⚡ Advanced Capabilities & Examples
 
@@ -181,6 +193,7 @@ For full configuration examples and migration guides, see the [examples/](exampl
 | `:Pack delete <name>` | Removes a plugin from state and deletes it via native `vim.pack`. |
 | `:Pack profile` | Displays the startup profile with visual bar charts showing plugin load times. |
 | `:Pack diff` | Displays a structured diff of pending commits for outdated plugins before updating. |
+| `:Pack picker` | Opens interactive plugin picker (`snacks.picker` / `vim.ui.select`) to edit plugin files. |
 
 Subcommands with a `<name>` argument tab-complete against your configured plugins.
 
