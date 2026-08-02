@@ -219,6 +219,8 @@ function M.setup_build_hooks(run_build_hook_fn, append_log_fn)
 						state.update_status(name, p.status_before_update)
 						p.status_before_update = nil
 					end
+					p._update_had_pending = nil
+					p._update_ticks = nil
 					state.set_behind(name, 0)
 					state.set_outdated_detail(name, {})
 					ui_update()

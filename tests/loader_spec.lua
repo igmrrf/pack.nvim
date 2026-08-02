@@ -164,5 +164,94 @@ describe("pack.loader triggers", function()
     assert.is_true(ok)
     assert.equals("loaded", p.status)
   end)
+
+  it("does not warn when a lazy plugin with a bare `keys` entry (no rhs) loads", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        -- Bare key: plugin owns the real mapping, this only triggers lazy-load.
+        { "user/barekey.nvim", dir = dir, lazy = true, keys = { "<F30>" } },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["barekey.nvim"]
+
+    local warned = false
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.WARN and type(msg) == "string" and msg:find("nothing to bind") then
+        warned = true
+      end
+    end
+
+    loader.setup_triggers(p)
+    loader.load("barekey.nvim")
+
+    vim.notify = orig_notify
+    assert.is_false(warned, "post-load rebind of a bare lazy key must not warn 'nothing to bind'")
+    pcall(vim.keymap.del, "n", "<F30>")
+  end)
+
+  it("still warns for a non-lazy plugin declaring a bare `keys` entry (genuine no-op)", function()
+    local p = make_plugin({ status = "loaded", lazy = false, keys = { "<F29>" } })
+    local warned = false
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.WARN and type(msg) == "string" and msg:find("nothing to bind") then
+        warned = true
+      end
+    end
+    loader.setup_triggers(p)
+    vim.notify = orig_notify
+    assert.is_true(warned, "a non-lazy bare key is a real misconfig and should warn")
+  end)
+
+  it("does not mark the lazy-load placeholder as an <expr> mapping", function()
+    local p = make_plugin({ keys = { { "<F31>", function() return "x" end, expr = true } } })
+    loader.setup_triggers(p)
+    local map = vim.fn.maparg("<F31>", "n", false, true)
+    assert.equals(0, map.expr, "the lazy placeholder must not be expr (feedkeys under expr hits textlock)")
+    loader.remove_triggers(p)
+    pcall(vim.keymap.del, "n", "<F31>")
+  end)
+
+  it("replays the returned string of an expr function rhs on initial trigger", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local fn_called = false
+    local config = {
+      plugins = {
+        {
+          "user/exprfn.nvim",
+          dir = dir,
+          lazy = true,
+          keys = {
+            {
+              "<F32>",
+              function()
+                fn_called = true
+                return "ihello<Esc>"
+              end,
+              expr = true,
+            },
+          },
+        },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["exprfn.nvim"]
+    loader.setup_triggers(p)
+
+    local map = vim.fn.maparg("<F32>", "n", false, true)
+    assert.is_not_nil(map.callback)
+    map.callback()
+
+    assert.is_true(fn_called, "expr function rhs must be invoked on initial trigger")
+    assert.equals("loaded", p.status, "plugin must be loaded")
+    pcall(vim.keymap.del, "n", "<F32>")
+  end)
 end)
 

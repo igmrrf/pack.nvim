@@ -35,21 +35,27 @@ local function normalize_key_entries(raw)
 end
 
 -- Set up keymaps for lazy or loaded plugin.
-function M.setup_keys(p, load_cb)
+-- opts.rebind marks the post-load re-bind pass (M.load): a bare key (no rhs) there
+-- already did its job by loading the plugin, which now owns the real mapping, so skip
+-- it silently instead of warning "nothing to bind".
+function M.setup_keys(p, load_cb, opts)
+	opts = opts or {}
 	for _, entry in ipairs(normalize_key_entries(p.keys)) do
 		local lhs = entry.lhs
 		if not lhs then
 			vim.notify("pack: '" .. p.name .. "' has a keys entry with no lhs - skipping", vim.log.levels.WARN)
 		elseif p.status == "loaded" then
 			if entry.rhs == nil then
-				vim.notify(
-					"pack: '"
-						.. p.name
-						.. "' keys entry '"
-						.. lhs
-						.. "' has no rhs and the plugin isn't lazy - nothing to bind",
-					vim.log.levels.WARN
-				)
+				if not opts.rebind then
+					vim.notify(
+						"pack: '"
+							.. p.name
+							.. "' keys entry '"
+							.. lhs
+							.. "' has no rhs and the plugin isn't lazy - nothing to bind",
+						vim.log.levels.WARN
+					)
+				end
 			else
 				for _, mode in ipairs(entry.modes) do
 					vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
@@ -70,7 +76,14 @@ function M.setup_keys(p, load_cb)
 					for _, mode in ipairs(entry.modes) do
 						vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
 					end
-					entry.rhs()
+					if entry.opts and entry.opts.expr then
+						local res = entry.rhs()
+						if type(res) == "string" and res ~= "" then
+							vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(res, true, true, true), "m", false)
+						end
+					else
+						entry.rhs()
+					end
 				else
 					for _, mode in ipairs(entry.modes) do
 						vim.keymap.set(mode, lhs, entry.rhs, entry.opts)
@@ -78,9 +91,14 @@ function M.setup_keys(p, load_cb)
 					replay()
 				end
 			end
-			local trigger_opts = vim.tbl_extend("force", { desc = "pack: lazy-load " .. p.name }, entry.opts)
+			-- The placeholder drives nvim_feedkeys/load_cb, not an expression result, so
+			-- it must NOT be an <expr> mapping (feedkeys under expr eval hits textlock).
+			-- expr/replace_keycodes belong only to the real post-load rebind above.
+			local placeholder_opts = vim.tbl_extend("force", { desc = "pack: lazy-load " .. p.name }, entry.opts)
+			placeholder_opts.expr = nil
+			placeholder_opts.replace_keycodes = nil
 			for _, mode in ipairs(entry.modes) do
-				vim.keymap.set(mode, lhs, trigger, trigger_opts)
+				vim.keymap.set(mode, lhs, trigger, placeholder_opts)
 			end
 		end
 	end
