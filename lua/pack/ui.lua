@@ -31,6 +31,7 @@ function M.close()
 		win_id = nil
 		buf_id = nil
 	end
+	spinner_mod.stop_spinner()
 end
 
 function M.ensure_spinner()

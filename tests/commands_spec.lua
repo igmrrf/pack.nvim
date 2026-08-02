@@ -11,10 +11,12 @@ describe("Pack user commands and subcommands", function()
         { "user/foo.nvim" },
         { "user/bar.nvim" },
       },
+      ui = { auto_open = false },
     })
   end)
 
   after_each(function()
+    pcall(ui.close)
     local wins = vim.api.nvim_list_wins()
     for i = 2, #wins do
       pcall(vim.api.nvim_win_close, wins[i], true)
@@ -159,7 +161,7 @@ describe("Pack user commands and subcommands", function()
 
   it("supports config.ui.filter modes (default, function)", function()
     -- Default mode (vim.ui.input)
-    pack.setup({ ui = { filter = "default" } })
+    pack.config.ui.filter = "default"
     local ui_input_called = false
     local orig_ui_input = vim.ui.input
     vim.ui.input = function(opts, cb)
@@ -170,18 +172,17 @@ describe("Pack user commands and subcommands", function()
     ui.filter()
     assert.is_true(ui_input_called)
     vim.ui.input = orig_ui_input
+    ui.close()
 
     -- Custom function mode
     local custom_called = false
-    pack.setup({
-      ui = {
-        filter = function(opts, cb)
-          custom_called = true
-          cb("baz")
-        end,
-      },
-    })
+    pack.config.ui.filter = function(opts, cb)
+      custom_called = true
+      cb("baz")
+    end
+    ui.open(pack.config)
     ui.filter()
     assert.is_true(custom_called)
+    ui.close()
   end)
 end)

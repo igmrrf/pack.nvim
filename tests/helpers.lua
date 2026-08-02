@@ -6,6 +6,13 @@ local persist = require("pack.persist")
 local M = {}
 
 function M.reset()
+  if package.loaded["pack.ui"] then
+    pcall(require("pack.ui").close)
+  end
+  if package.loaded["pack.ui.spinner"] then
+    pcall(require("pack.ui.spinner").stop_spinner)
+  end
+
   pack._real_native = nil
   local test_opt_dir = vim.fn.tempname() .. "-site-pack-opt"
   vim.fn.mkdir(test_opt_dir, "p")
@@ -14,7 +21,7 @@ function M.reset()
     state._set_native_opt_dir_for_testing(test_opt_dir)
   end
 
-  pack.native_pack = {
+  local fake_native = {
     add = function(specs, opts)
       for _, s in ipairs(specs) do
         local p_dir = test_opt_dir .. "/" .. s.name
@@ -28,6 +35,10 @@ function M.reset()
     del = function(names) end,
     get = function() return {} end,
   }
+  pack.native_pack = fake_native
+  -- pack.setup() reads vim.pack to detect native vim.pack; without this it
+  -- would adopt the *real* vim.pack and attempt actual git clones in tests.
+  vim.pack = fake_native
 
   state.init({ plugins = {} })
   if loader._reset_for_testing then
