@@ -7,36 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Native Neovim 0.12+ `vim.pack` integration.
-- Lazy-loading by events, filetypes, commands, and keymaps.
+- Native Neovim 0.12+ `vim.pack` integration and bootstrap mechanism.
+- Lazy-loading triggers via events, filetypes, commands, and keymaps.
 - Floating dashboard for updates, logs, and profiling.
-- Persistent disable state.
+- Persistent disabled-plugin state and JSON store.
 - Build hooks support.
-- MIT License.
-- Documentation `doc/pack.txt`.
-- `092ab05`: Automatically migrate plugins between opt and start when lazy flag changes.
-- `7b2d6d0`: Add keys lazy-load trigger, `map_keys` helper, and fix packpath bug.
-- `5e9dccb`: Add `opts`/`main` shorthand to skip writing a config function.
-- `e9cd65a`: Add persisted disabled-plugin JSON store.
-- `6adc04d`: Track disabled/behind state and persist disabled flag.
-- `cbdc2a0`: Add git-fetch based outdated-plugin detection.
-- `ce23dbe`: Add dashboard help popup (`?`).
-- `ce35962`: Add quick/full plugin details popups, move logs to `l`.
-- `c2d6d64`: Add All/Outdated/Disabled dashboard tabs.
-- `3946e42`: Add disable/enable toggle (`x`) to dashboard.
-- `59bbac1`: Rich per-plugin outdated display, recheck (`c`) and update keymaps (`u`/`U`).
-- `bea5860`: Implement lockfile and `nvim-pack-extra` json schema.
-- `fabf7f5`: Adopt advanced declarative spec features inspired by `zpack.nvim`.
-- `c82d993`: Add native vim pack bootstrap and all features spec examples.
-- `ea96aa0`: Add single shared loading spinner and in-flight update state.
-- `a2c0b4e`: Preserve `pack.nvim` metadata on native-style (`src=`) specs.
-- `202eca8`: Add health checks, helptags generation, and CI setup.
+- Support for dual-style tracking: manage both declarative specs and unknown adopted native plugins.
+- Tools to upgrade adopted plugin stubs into fully managed plugins.
+- Pending updates diff viewer, advanced filtering, and load-time visualization.
+- Multi-select support in the dashboard with checkboxes, contextual top key bar, and updated tab styling.
+- Lockfile implementation and `nvim-pack-extra` JSON schema.
+- Git-fetch based outdated-plugin detection and rich per-plugin outdated display.
+- Single shared loading spinner and in-flight update states.
+- Auto-migration of plugins between `opt` and `start` directories when the lazy flag changes.
+- `opts`/`main` shorthand to skip writing explicit config functions.
+- `auto_open` and `silent` configuration options for startup behavior.
+- Quick/full plugin details popups and help popups.
+- Real-time build status display in the Outdated tab, holding the "behind" state until the build finishes.
+- Non-interactive sync API and live log streaming.
+- Auto-positioning of the cursor on the first plugin when opening the dashboard.
+- Enhanced UX with auto-switching details and auto-closing on specific actions.
 
 ### Changed
-- Refactored entire codebase to delegate cloning and locking to `vim.pack`.
+- Refactored the entire codebase into focused, modular submodules.
 - Refactored asynchronous operations for checking updates.
+- Refined dashboard layout, tab navigation (All/Outdated/Disabled), and action keymaps.
+- Reset plugins on initialization to restore isolation and allow for safe re-initialization.
+- Setup now registers declarative specs additively so wrapper-added plugins survive.
+- Resolved `default_main` evaluation by probing the plugin's `lua/` directory.
 
 ### Fixed
-- Fixed bug where a failed network fetch would mark a plugin as errored and disable lazy triggers.
-- Made test suite hermetic to avoid cross-test `ftdetect` cache collisions.
+- Fixed issue where a failed network fetch would mark a plugin as errored and disable lazy triggers.
+- Inferred `lazy = true` automatically when `event`, `ft`, `cmd`, or `keys` are defined without an explicit flag.
+- Prevented infinite recursion when lazy plugins require their own module during `packadd`.
+- Ensured keys are properly rebound regardless of which path loaded the plugin.
+- Fixed dependency stubs improperly shadowing full plugin specifications by relying on native active flags.
+- Fixed `plugin_at_cursor` scope error and preserved cursor position during updates.
+- Improved cleanup and uninstallation of unmanaged plugins using `vim.pack.del`.
+- Ensured plugin commands are sourced before executing ex-command build hooks.
+- Reflected build hook failures accurately in the overall plugin status.
+- Addressed `nvim_buf_set_lines` rejections by ensuring detail lines are strictly newline-free.
+- Stabilized UI cleanup routines and fortified test isolation for a hermetic test suite.
+- Whitelisted `vim.keymap.set` opts fields on keys entries.
 - Added fallback for `fs_rename` on Windows.
+- Addressed immutability issues during setup, re-entrancy bugs, and improved health checks.
+- Sanitized native spec data and properly batched plugin installations.
+
+### Documentation
+- Added MIT License and `doc/pack.txt`.
+- Added open-source community guidelines, templates, license, and security policies.
+- Streamlined the README, adding a comprehensive plugin spec and API reference section.
+- Migrated the comparison matrix directly into the README.
+- Synchronized dashboard keymap documentation to reflect 1:1 with the actual implementation.
+- Updated README image URLs to point directly to reliable media links.
+- Documented limitations when mixing tracking styles and clarified the first-writer-wins strategy.
+- Added all features spec examples.

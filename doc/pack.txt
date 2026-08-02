@@ -12,32 +12,128 @@ lazy-loading system, configuration management, and a floating UI dashboard on
 top of the native features.
 
 Features:
-- Native git operations via |vim.pack|
-- Lazy-loading by events, filetypes, commands, and keymaps
-- Floating dashboard for updates, logs, and profiling
-- Persistent disable state
-- Build hooks
+- Native Backend: all plugins under vim.pack's directory. Every plugin
+  packadd-ed explicitly.
+- Native Git, Async Probes: Clone/checkout/update/pinning by native vim.pack.
+  Concurrency-limited async git probes for dashboard.
+- Interactive UI Dashboard: floating window with real-time statuses, log
+  streaming, pending-commit previews.
+- Reproducible installs: Version pinning (branch/tag/commit/semver), native
+  lockfile, :Pack restore.
+- Persistent Disable State: via nvim-pack-extra.json.
+- Performance Caching: ftdetect cache pre-compiled at startup.
+- Lazy Loading: cmd, event (with patterns), ft, keys triggers.
+- Modular Configuration: { import = "plugins" } for split specs.
+- Fine-Grained Loading Control: enabled, cond, priority.
+- Help Tags: auto-generated for managed plugins.
+- Health Check: :checkhealth pack.
+
+==============================================================================
+REQUIREMENTS                                                 *pack-requirements*
+
+- Neovim 0.12+ (which includes |vim.pack|)
+- `git` must be available on your PATH.
 
 ==============================================================================
 SETUP                                                              *pack-setup*
 
-To use pack.nvim, you must have Neovim 0.12+ which includes |vim.pack|.
+pack.nvim leverages Neovim 0.12's native |vim.pack| for bootstrapping.
+Add this snippet to the top of your `init.lua`:
 
-Initialize pack.nvim in your init.lua:
 >lua
+    -- Enable Neovim's built-in bytecode cache
+    vim.loader.enable()
+
+    vim.g.mapleader = " "
+    vim.g.maplocalleader = " "
+
+    -- Bootstrap pack.nvim using Neovim's native vim.pack
+    vim.pack.add({
+      { src = "https://github.com/igmrrf/pack.nvim", branch = "main" },
+    })
+    vim.cmd.packadd("pack.nvim")
+
+    -- Initialize pack.nvim with options and plugin specs
     require("pack").setup({
+      performance = {
+        vim_loader = true,
+      },
       ui = { border = "rounded" },
       plugins = {
+        { "igmrrf/pack.nvim" },
         { "nvim-lua/plenary.nvim" },
         { "nvim-telescope/telescope.nvim", lazy = true, cmd = "Telescope" },
+        { import = "plugins" },
       },
     })
 <
 
-==============================================================================
-USAGE                                                              *pack-usage*
+After `setup()`, pack.nvim replaces the global `vim.pack.add`/`vim.pack.update`/
+`vim.pack.del` with lazy-aware wrappers, so you can keep calling
+`vim.pack.add({ ... })` and it flows through pack.nvim's loader.
 
-Commands:
+==============================================================================
+PLUGIN SPECIFICATION                                         *pack-specification*
+
+Plugins are defined using a table specification. The following fields are
+supported for each plugin spec:
+
+  [1] / src      (string) The plugin repository (e.g. "user/repo"), a full Git
+                 URL, or a local path.
+  as / name      (string) Custom name/alias for the plugin.
+  dir            (string) Local development path for the plugin.
+  lazy           (boolean) Defer loading of the plugin.
+  priority       (number) Load order for eager plugins (higher loads first,
+                 default is 50).
+  enabled        (boolean|function) Whether the plugin is enabled. Can be a
+                 function returning a boolean.
+  cond           (boolean|function) Condition to load the plugin. Can be a
+                 function taking the plugin spec and returning a boolean.
+  main           (string) Override target module name for setup.
+  cmd            (string|table) Lazy-load command triggers.
+  ft             (string|table) Filetype triggers.
+  event          (string|table) Autocmd event triggers.
+  pattern        (string|table) Pattern filter for event triggers.
+  keys           (string|table) Keymap lazy-load triggers.
+  module         (string) Custom module name for require() tracking.
+  dependencies   (table) Dependent plugin specs.
+  init           (function) Callback executed before plugin load.
+  opts           (table) Options table passed to `require(main).setup(opts)`.
+  config         (function) Custom callback executed after plugin load.
+  build          (string|function) Shell command or Lua function executed
+                 post-install/update.
+  branch         (string) Git branch to pin.
+  tag            (string) Git tag to pin.
+  commit         (string) Git commit hash to pin.
+  version        (string) Semver version to pin.
+  category       (string) Category metadata for dashboard filtering.
+  tags           (table) Custom tags for dashboard filtering.
+
+==============================================================================
+CONFIGURATION                                                *pack-configuration*
+
+`pack.setup(opts)` accepts an `opts` table for configuration:
+
+Options:
+    `ui`             Table of UI configuration.
+      `border`       String or Table. Window border style (e.g. "rounded").
+      `filter`       String or Function. Filter input mode ("default",
+                     "input", or callback).
+      `auto_open`    Boolean. Auto-open when uninstalled plugins exist
+                     (default true).
+      `silent`       Boolean. Silence native vim.pack messages
+                     (defaults to auto_open).
+      `icons`        Table. Custom icons for the dashboard.
+                     (e.g. `{ loaded = "✓", not_loaded = "✗", error = "!",
+                     sync = "…" }`)
+
+    `performance`    Table of performance configuration.
+      `vim_loader`   Boolean. Fallback to ensure `vim.loader.enable()` is
+                     called for performance caching.
+
+==============================================================================
+COMMANDS                                                         *pack-commands*
+
     :Pack             Open the pack.nvim dashboard.
     :Pack sync        Update all plugins and build them.
     :Pack update [name] Update specified plugin or all plugins.
@@ -50,7 +146,11 @@ Commands:
     :Pack profile     Show startup profile load time chart.
     :Pack diff        Show pending updates diff for outdated plugins.
 
-In the dashboard, you can use the following default mappings:
+==============================================================================
+DASHBOARD KEYMAPS                                                 *pack-keymaps*
+
+In the `:Pack` dashboard, you can use the following default mappings:
+
     `?`        - Show help popup
     `q`        - Close dashboard
     `<CR>`     - Toggle plugin details inline
@@ -76,6 +176,21 @@ In the dashboard, you can use the following default mappings:
 Each tab also displays a contextual quick help bar at the bottom.
 
 ==============================================================================
+LUA API                                                                *pack-api*
+
+require("pack").setup(opts)
+    Initialize pack.nvim with the given configuration options.
+
+require("pack").add(specs)
+    Dynamically add new plugin specs after setup.
+
+require("pack").map_keys(keys)
+    Helper to manually register lazy keymaps.
+
+require("pack.state").set_disabled(name, disabled)
+    Programmatically toggle the disabled state of a plugin by name.
+
+==============================================================================
 KNOWN LIMITATIONS                                            *pack-limitations*
 
 Mixing native |vim.pack| calls with pack.nvim's declarative spec has two
@@ -97,14 +212,18 @@ sharp edges:
   declare each plugin once, in one style.
 
 ==============================================================================
-CONFIGURATION                                                *pack-configuration*
+HEALTH CHECK                                                       *pack-health*
 
-`pack.setup(opts)` accepts an `opts` table for configuration:
+pack.nvim provides a health check to verify its setup and dependencies.
+You can run it using:
 
-Options:
-    `ui`             Table of UI configuration.
-      `border`       String or Table. Window border style (e.g. "rounded").
-      `filter`       String or Function. Filter input mode ("default", "input", or callback).
+    :checkhealth pack
+
+==============================================================================
+ABOUT                                                               *pack-about*
+
+pack.nvim is open source software released under the MIT License.
+For issues and contributions, please visit the repository.
 
 ==============================================================================
  vim:tw=78:ts=8:ft=help:norl:
