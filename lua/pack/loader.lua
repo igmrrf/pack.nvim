@@ -242,7 +242,7 @@ function M.load(name, opts)
 		if p.keys then
 			triggers_mod.setup_keys(p, function(name)
 				M.load(name)
-			end)
+			end, { rebind = true })
 		end
 	else
 		-- packadd/local-load failed: record it so triggers stop re-attempting.
@@ -260,6 +260,7 @@ function M._reset_for_testing()
 	loading = {}
 	triggers_mod.reset()
 	search_mod.reset_cache()
+	search_mod.uninstall_searcher()
 end
 
 return M

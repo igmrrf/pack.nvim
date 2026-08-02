@@ -304,6 +304,10 @@ function M.update_plugins(names)
 		local p = plugins[name]
 		if p then
 			p.status_before_update = p.status
+			-- Remember whether this was a *real* update (had pending commits) vs a
+			-- likely no-op (already at latest). Native fires PackChanged for real
+			-- updates but stays silent for no-ops, so the two need different recovery.
+			p._update_had_pending = (p.behind or 0) > 0
 			state.update_status(name, "updating")
 		end
 	end
@@ -313,15 +317,30 @@ function M.update_plugins(names)
 	end
 
 	-- Restore any of `names` still stuck in "updating" back to its prior status.
-	-- Covers both a synchronous throw below and the silent case where native
-	-- emits no PackChanged(update) (e.g. a plugin already at its latest revision),
-	-- which would otherwise leave the dashboard showing "updating…" forever.
-	local function recover()
+	-- Two callers:
+	--   * synchronous throw (from_timer=false): nothing is in flight, so flip ALL
+	--     targets back immediately.
+	--   * fallback timer (from_timer=true): only the silent no-op case needs
+	--     rescuing. A plugin that had pending commits is a genuine, possibly slow
+	--     update; native WILL fire PackChanged(update) for it, so leave it
+	--     "updating" and let that event restore it — otherwise the timer would
+	--     prematurely drop the "updating…" indicator on a large/slow repo.
+	local function recover(from_timer)
 		for _, name in ipairs(names) do
 			local p = plugins[name]
 			if p and p.status == "updating" then
-				state.update_status(name, p.status_before_update or "installed")
-				p.status_before_update = nil
+				p._update_ticks = (p._update_ticks or 0) + 1
+				if from_timer and p._update_had_pending and p._update_ticks < 2 then
+					-- real update in flight; give it a second timer window before forcing recovery
+					vim.defer_fn(function()
+						recover(true)
+					end, M.update_recover_ms)
+				else
+					state.update_status(name, p.status_before_update or "installed")
+					p.status_before_update = nil
+					p._update_had_pending = nil
+					p._update_ticks = nil
+				end
 			end
 		end
 		ui_update()
@@ -330,12 +349,14 @@ function M.update_plugins(names)
 	local ok, err = pcall(pack.native_pack.update, names, { force = true })
 	if not ok then
 		vim.notify("pack: update failed: " .. tostring(err), vim.log.levels.ERROR)
-		recover()
+		recover(false)
 		return
 	end
 	-- Fallback timer for the no-event case; PackChanged(update) normally restores
 	-- status well before this fires.
-	vim.defer_fn(recover, M.update_recover_ms)
+	vim.defer_fn(function()
+		recover(true)
+	end, M.update_recover_ms)
 end
 
 return M

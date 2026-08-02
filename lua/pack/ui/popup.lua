@@ -274,7 +274,25 @@ function M.show_log(p)
 			end
 		end
 	end, { ["repeat"] = -1 })
+	log_view.timer = timer
 	return buf, win
+end
+
+-- Proactively stop the streaming log view (its repeating 120ms timer + window),
+-- e.g. when the dashboard closes. The timer otherwise only self-stops on its next
+-- tick once it notices the window went invalid.
+function M.stop_log_view()
+	local v = log_view
+	if not v then
+		return
+	end
+	if v.timer then
+		pcall(vim.fn.timer_stop, v.timer)
+	end
+	if v.win and vim.api.nvim_win_is_valid(v.win) then
+		pcall(vim.api.nvim_win_close, v.win, true)
+	end
+	log_view = nil
 end
 
 return M

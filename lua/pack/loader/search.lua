@@ -75,7 +75,7 @@ function M.setup_package_searcher(load_cb)
 	in_ftdetect = false
 
 	if not M._searcher_installed then
-		table.insert(package.loaders or package.searchers, 1, function(modname)
+		local searcher = function(modname)
 			if in_ftdetect then
 				return nil
 			end
@@ -121,9 +121,29 @@ function M.setup_package_searcher(load_cb)
 					return nil
 				end
 			end
-		end)
+		end
+		local searchers = package.loaders or package.searchers
+		table.insert(searchers, 1, searcher)
+		M._searcher_fn = searcher
 		M._searcher_installed = true
 	end
+end
+
+-- Remove the package searcher installed by setup_package_searcher. Mainly for test
+-- isolation: the searcher is process-global and resolves against the live registry,
+-- so leaving it installed lets one test's lazy set leak into the next.
+function M.uninstall_searcher()
+	local searchers = package.loaders or package.searchers
+	if M._searcher_fn then
+		for i, fn in ipairs(searchers) do
+			if fn == M._searcher_fn then
+				table.remove(searchers, i)
+				break
+			end
+		end
+	end
+	M._searcher_fn = nil
+	M._searcher_installed = nil
 end
 
 function M.reset_cache()

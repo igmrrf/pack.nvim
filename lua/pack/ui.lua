@@ -32,6 +32,12 @@ function M.close()
 		buf_id = nil
 	end
 	spinner_mod.stop_spinner()
+	-- Proactively tear down the dashboard's own augroups and the streaming log
+	-- view rather than relying on their lazy self-deletion (resize augroup on the
+	-- next VimResized, log timer on its next tick).
+	pcall(vim.api.nvim_del_augroup_by_name, "pack_ui_resize")
+	pcall(vim.api.nvim_del_augroup_by_name, "pack_ui_startup_focus")
+	pcall(popup.stop_log_view)
 end
 
 function M.ensure_spinner()
@@ -254,10 +260,23 @@ function M.update(opts)
 	end
 
 	local prev_plugin
+	local prev_line
+	local prev_header_line
 	if win_id and vim.api.nvim_win_is_valid(win_id) then
-		prev_plugin = plugin_at_cursor(win_id)
+		prev_line = vim.api.nvim_win_get_cursor(win_id)[1]
+		prev_plugin = plugin_map[prev_line]
+		if prev_plugin then
+			for i = prev_line, 1, -1 do
+				if plugin_map[i] and plugin_map[i].name == prev_plugin.name then
+					prev_header_line = i
+				else
+					break
+				end
+			end
+		end
 	end
 	local prev_plugin_name = prev_plugin and prev_plugin.name or nil
+	local prev_offset = (prev_line and prev_header_line) and (prev_line - prev_header_line) or 0
 
 	local cursor
 	if win_id and vim.api.nvim_win_is_valid(win_id) then
@@ -343,11 +362,39 @@ function M.update(opts)
 				cursor[1] = 1
 			end
 		else
-			if cursor[1] > #lines then
-				cursor[1] = math.max(1, #lines)
+			-- Re-anchor onto the same plugin the cursor was on before the refresh:
+			-- an async status change above it (a plugin finishing/collapsing, an
+			-- inline log growing) shifts its row, and clamping the raw line number
+			-- would silently land the cursor on a different plugin.
+			local reanchored = false
+			if prev_plugin_name then
+				local new_header_line
+				local new_last_line
+				for i = 1, #lines do
+					if plugin_map[i] and plugin_map[i].name == prev_plugin_name then
+						if not new_header_line then
+							new_header_line = i
+						end
+						new_last_line = i
+					end
+				end
+				if new_header_line then
+					local target = new_header_line + prev_offset
+					if target <= new_last_line then
+						cursor[1] = target
+					else
+						cursor[1] = new_last_line
+					end
+					reanchored = true
+				end
 			end
-			if cursor[1] < 1 then
-				cursor[1] = 1
+			if not reanchored then
+				if cursor[1] > #lines then
+					cursor[1] = math.max(1, #lines)
+				end
+				if cursor[1] < 1 then
+					cursor[1] = 1
+				end
 			end
 		end
 

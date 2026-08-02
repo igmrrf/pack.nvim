@@ -1025,5 +1025,61 @@ describe("pack.ui", function()
       assert.truthy(full_text:find("Disabled State Information"))
     end)
   end)
+
+  describe("cursor stability", function()
+    it("keeps the cursor on the same plugin when a refresh shifts lines above it", function()
+      local config = config_with({ "user/aaa.nvim", "user/zzz.nvim" })
+      state.init(config)
+      -- aaa (Installing group) renders above zzz (Installed group). aaa is
+      -- auto-expanded because it is installing, so growing its inline log pushes
+      -- zzz's row down on the next render.
+      local plugins = state.get_plugins()
+      state.update_status("zzz.nvim", "installed")
+      state.update_status("aaa.nvim", "installing")
+      plugins["aaa.nvim"].log = { "cloning... 10%" }
+
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+
+      -- Park the cursor on zzz.
+      local zline = find_line(buf, "zzz%.nvim")
+      vim.api.nvim_win_set_cursor(0, { zline, 0 })
+
+      -- Add another inline log line above zzz, then refresh.
+      plugins["aaa.nvim"].log = { "cloning... 10%", "cloning... 80%" }
+      ui.update()
+
+      -- The cursor must have followed zzz to its new row, not stayed on the old
+      -- line number (which now shows aaa's expanded log).
+      local cur = vim.api.nvim_win_get_cursor(0)
+      local line_text = vim.api.nvim_buf_get_lines(buf, cur[1] - 1, cur[1], false)[1] or ""
+      assert.is_true(line_text:match("zzz%.nvim") ~= nil, "cursor drifted off zzz.nvim; landed on: " .. line_text)
+    end)
+
+    it("keeps the cursor on an expanded plugin detail line offset after UI update", function()
+      local config = config_with({ "user/aaa.nvim", "user/zzz.nvim" })
+      state.init(config)
+      local plugins = state.get_plugins()
+      state.update_status("zzz.nvim", "installed")
+      state.update_status("aaa.nvim", "installing")
+      plugins["aaa.nvim"].log = { "cloning... 10%", "cloning... 50%" }
+
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+
+      -- Position cursor on line 2 of aaa.nvim's expanded log (line after header)
+      local aaline = find_line(buf, "aaa%.nvim")
+      local detail_line = aaline + 2
+      vim.api.nvim_win_set_cursor(0, { detail_line, 0 })
+
+      -- Refresh UI (e.g. spinner tick)
+      ui.update()
+
+      local cur = vim.api.nvim_win_get_cursor(0)
+      assert.equals(detail_line, cur[1], "cursor must stay on detail line offset after refresh")
+      local line_text = vim.api.nvim_buf_get_lines(buf, cur[1] - 1, cur[1], false)[1] or ""
+      assert.is_true(line_text:match("cloning") ~= nil, "cursor must still point to detail line content: " .. line_text)
+    end)
+  end)
 end)
 

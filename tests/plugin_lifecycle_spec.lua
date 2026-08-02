@@ -226,3 +226,44 @@ describe("pack.init _install_and_load chunking and pcall guard", function()
     assert.equals("installing", state.get_plugins()["instplug"].status)
   end)
 end)
+
+describe("pack.setup version gate (<0.12, no native vim.pack)", function()
+  local pack = require("pack")
+  local orig_vim_pack, orig_real_native, orig_native
+
+  before_each(function()
+    orig_vim_pack = vim.pack
+    orig_real_native = pack._real_native
+    orig_native = pack.native_pack
+    pack._real_native = nil
+    state.init({ plugins = {} })
+  end)
+
+  after_each(function()
+    vim.pack = orig_vim_pack
+    pack._real_native = orig_real_native
+    pack.native_pack = orig_native
+  end)
+
+  it("warns and no-ops when native vim.pack.add is unavailable", function()
+    -- Simulate an older Neovim: vim.pack exists but has no .add (or is absent).
+    vim.pack = {} -- no .add
+
+    local warned = false
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.ERROR and type(msg) == "string" and msg:find("0.12") then
+        warned = true
+      end
+    end
+
+    local ok = pcall(pack.setup, { plugins = { "user/should_not_register.nvim" } })
+
+    vim.notify = orig_notify
+    assert.is_true(ok, "setup must not throw on an unsupported Neovim")
+    assert.is_true(warned, "setup must warn about the 0.12 requirement")
+    -- Early return: no wrapper installed, no plugin registered.
+    assert.is_nil(rawget(vim.pack, "__pack_wrapper"), "no wrapper must be installed")
+    assert.is_nil(state.get_plugins()["should_not_register.nvim"], "no plugin should be registered")
+  end)
+end)

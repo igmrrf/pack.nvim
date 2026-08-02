@@ -114,4 +114,29 @@ describe("pack.async stuck-updating recovery (2.3)", function()
     end)
     assert.equals("installed", p.status, "recovery timeout must restore the prior status")
   end)
+
+  it("does not prematurely flip a plugin with pending commits (real update in flight)", function()
+    state.init({ plugins = { "u/slow.nvim" } })
+    local p = state.get_plugins()["slow.nvim"]
+    p.status = "installed"
+    state.set_behind("slow.nvim", 3) -- had real pending work -> a genuine update
+    pack.native_pack = {
+      -- Simulate a slow-but-real update: succeeds, PackChanged will fire *later*
+      -- than the recover timer (here it never fires in the test window).
+      update = function() end,
+    }
+    async.update_recover_ms = 50
+    async.update_plugins({ "slow.nvim" })
+    assert.equals("updating", p.status, "status flips to updating up front")
+
+    -- Within 1 tick window: plugin with pending commits stays updating
+    vim.wait(70)
+    assert.equals("updating", p.status, "a real in-flight update is granted 1 tick grace period")
+
+    -- After second tick window (2 ticks total): max deadline forces recovery even if PackChanged never fired
+    vim.wait(300, function()
+      return p.status ~= "updating"
+    end)
+    assert.equals("installed", p.status, "max recovery deadline forces recovery after 2 ticks")
+  end)
 end)

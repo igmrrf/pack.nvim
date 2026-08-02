@@ -18,4 +18,27 @@ describe("pack.ui popup cleanup (2.6)", function()
       "popup augroup must be deleted after the window closes"
     )
   end)
+
+  it("tears down the dashboard resize/startup-focus augroups on close", function()
+    local state = require("pack.state")
+    local cfg = {
+      plugins = { "user/foo.nvim" },
+      ui = { border = "rounded", icons = { loaded = "*", not_loaded = "o", error = "x", sync = "~" } },
+    }
+    state.init(cfg)
+    ui.open(cfg)
+
+    assert.is_true(pcall(vim.api.nvim_get_autocmds, { group = "pack_ui_resize" }), "resize augroup exists while open")
+
+    ui.close()
+
+    assert.is_false(
+      pcall(vim.api.nvim_get_autocmds, { group = "pack_ui_resize" }),
+      "pack_ui_resize augroup must be deleted on ui.close()"
+    )
+    assert.is_false(
+      pcall(vim.api.nvim_get_autocmds, { group = "pack_ui_startup_focus" }),
+      "pack_ui_startup_focus augroup must be deleted on ui.close()"
+    )
+  end)
 end)
