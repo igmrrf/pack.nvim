@@ -33,7 +33,7 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 		local sel_prefix = render_checkbox and (is_selected and "[✓] " or "[ ] ") or ""
 		local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
 		local suffix = (p.status == "updating") and "updating…"
-			or (p.status == "building") and "building…"
+			or (p.status == "building") and (p.build_progress and string.format("building… [%d/%d: %s]", p.build_progress.current, p.build_progress.total, p.build_progress.desc) or "building…")
 			or ((p.behind or 0) .. " behind")
 		table.insert(
 			lines,
@@ -97,6 +97,20 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 					table.insert(highlights, { line = #lines - 1, col_start = 6, col_end = -1, hl = "Comment" })
 				end
 			end
+
+			if p.log and #p.log > 0 then
+				table.insert(lines, "")
+				plugin_map[#lines] = p
+				table.insert(lines, "      Log:")
+				plugin_map[#lines] = p
+				local start_idx = math.max(1, #p.log - 7)
+				for i = start_idx, #p.log do
+					table.insert(lines, "        " .. p.log[i])
+					plugin_map[#lines] = p
+					table.insert(highlights, { line = #lines - 1, col_start = 8, col_end = -1, hl = "Comment" })
+				end
+			end
+
 			table.insert(lines, "")
 			plugin_map[#lines] = p
 		end

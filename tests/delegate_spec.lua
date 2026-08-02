@@ -18,8 +18,8 @@ local function make_fake()
   function fake.update(names, opts)
     table.insert(fake.updated, { names = names, opts = opts })
   end
-  function fake.del(names)
-    table.insert(fake.deleted, names)
+  function fake.del(names, opts)
+    table.insert(fake.deleted, { names = names, opts = opts })
   end
   function fake.get()
     return fake.get_result
@@ -118,12 +118,13 @@ describe("pack.init native delegation", function()
     assert.equals("new.nvim", fake.added[#fake.added].name)
   end)
 
-  it("vim.pack.del removes state and delegates to native del", function()
+  it("vim.pack.del removes state and delegates to native del with force = true", function()
     do_setup({ "user/foo.nvim" })
     vim.pack.del("foo.nvim")
     assert.is_nil(state.get_plugins()["foo.nvim"])
     assert.equals(1, #fake.deleted)
-    assert.same({ "foo.nvim" }, fake.deleted[1])
+    assert.same({ "foo.nvim" }, fake.deleted[1].names)
+    assert.is_true(fake.deleted[1].opts and fake.deleted[1].opts.force)
   end)
 
   it("vim.pack.update delegates to native update", function()
@@ -186,7 +187,7 @@ describe("pack.init native delegation", function()
 
     -- Check that native del was invoked for old_deleted.nvim
     assert.equals(1, #fake.deleted)
-    assert.same({ "old_deleted.nvim" }, fake.deleted[1])
+    assert.same({ "old_deleted.nvim" }, fake.deleted[1].names)
     -- Check that old_deleted.nvim was removed from state
     assert.is_nil(state.get_plugins()["old_deleted.nvim"])
     -- Managed foo.nvim remains
@@ -281,5 +282,21 @@ describe("pack.init native delegation", function()
     -- MANAGED (Feature B), not wiped and not demoted to managed=false.
     assert.is_not_nil(plugins["imp.nvim"])
     assert.is_true(plugins["imp.nvim"].managed)
+  end)
+
+  it("silences git submodule and cloning notifications when is_silent is true", function()
+    local notified = false
+    local dummy_notify = function(msg)
+      notified = true
+    end
+
+    -- Run notification hook with silent = true
+    pack.setup({ ui = { silent = true }, plugins = {} })
+
+    vim.notify("Submodule 'dependencies/neotest' registered for path 'dependencies/neotest'")
+    assert.is_false(notified, "submodule notification should be silenced")
+
+    vim.notify("Cloning into '/some/path/neotest-bash/dependencies/neotest'...")
+    assert.is_false(notified, "cloning notification should be silenced")
   end)
 end)

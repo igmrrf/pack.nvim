@@ -161,41 +161,97 @@ function M.update_all_outdated(current_tab)
 	require("pack.async").update_plugins(names)
 end
 
-function M.sync_one(get_cursor_plugin_fn, update_ui_cb)
-	local p = get_cursor_plugin_fn()
-	if not p then
-		return
-	end
-	if p.disabled then
-		vim.notify("pack: '" .. p.name .. "' is disabled", vim.log.levels.WARN)
-		return
-	end
-	if p.status == "missing" then
-		local ns = state.to_native_spec(p)
-		if ns then
-			require("pack")._install_and_load({ ns }, false)
+function M.sync_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, update_ui_cb)
+	local targets = {}
+	if type(selected_plugins) == "table" then
+		for name, _ in pairs(selected_plugins) do
+			local p = state.get_plugins()[name]
+			if p then
+				table.insert(targets, p)
+			end
 		end
-	else
-		require("pack.async").update_plugin(p)
+	end
+	if #targets == 0 and type(get_cursor_plugin_fn) == "function" then
+		local p = get_cursor_plugin_fn()
+		if p then
+			table.insert(targets, p)
+		end
+	end
+	if #targets == 0 then
+		return
+	end
+
+	local to_install = {}
+	local to_update = {}
+	for _, p in ipairs(targets) do
+		if not p.disabled then
+			if p.status == "missing" then
+				local ns = state.to_native_spec(p)
+				if ns then
+					table.insert(to_install, ns)
+				end
+			else
+				table.insert(to_update, p.name)
+			end
+		end
+	end
+
+	if #to_install > 0 then
+		require("pack")._install_and_load(to_install, false)
+	end
+	if #to_update > 0 then
+		require("pack.async").update_plugins(to_update)
+	end
+	if clear_select_cb then
+		clear_select_cb()
 	end
 	if update_ui_cb then
 		update_ui_cb()
 	end
 end
 
-function M.delete_one(get_cursor_plugin_fn, clear_select_cb, update_ui_cb)
-	local p = get_cursor_plugin_fn()
-	if not p then
+function M.delete_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, update_ui_cb)
+	local targets = {}
+	if type(selected_plugins) == "table" then
+		for name, _ in pairs(selected_plugins) do
+			local p = state.get_plugins()[name]
+			if p then
+				table.insert(targets, p)
+			end
+		end
+	end
+	if #targets == 0 and type(get_cursor_plugin_fn) == "function" then
+		local p = get_cursor_plugin_fn()
+		if p then
+			table.insert(targets, p)
+		end
+	end
+	if #targets == 0 then
 		return
 	end
+
+	local names = {}
+	for _, p in ipairs(targets) do
+		table.insert(names, p.name)
+		pcall(function()
+			require("pack.loader").remove_triggers(p)
+		end)
+		if p.dir and vim.fn.isdirectory(p.dir) == 1 then
+			pcall(vim.fn.delete, p.dir, "rf")
+		end
+		state.remove_plugin(p.name)
+	end
+
 	pcall(function()
-		require("pack.loader").remove_triggers(p)
+		vim.pack.del(names)
 	end)
-	state.remove_plugin(p.name)
-	pcall(function()
-		vim.pack.del({ p.name })
-	end)
-	vim.notify("pack: Deleted '" .. p.name .. "' from disk", vim.log.levels.INFO)
+
+	if #names == 1 then
+		vim.notify("pack: Deleted '" .. names[1] .. "' from disk", vim.log.levels.INFO)
+	else
+		vim.notify("pack: Deleted " .. #names .. " plugins from disk (" .. table.concat(names, ", ") .. ")", vim.log.levels.INFO)
+	end
+
 	if clear_select_cb then
 		clear_select_cb()
 	end

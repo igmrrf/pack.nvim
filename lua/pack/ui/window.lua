@@ -25,21 +25,24 @@ function M.create_window(config, update_ui_cb)
 		style = "minimal",
 	})
 
+	local function focus_win()
+		if win_id and vim.api.nvim_win_is_valid(win_id) then
+			pcall(vim.api.nvim_set_current_win, win_id)
+		end
+	end
+
 	if vim.v.vim_did_enter == 0 then
 		vim.api.nvim_create_autocmd("VimEnter", {
 			group = vim.api.nvim_create_augroup("pack_ui_startup_focus", { clear = true }),
 			once = true,
 			callback = function()
-				if win_id and vim.api.nvim_win_is_valid(win_id) then
-					vim.api.nvim_set_current_win(win_id)
-				end
+				focus_win()
+				vim.schedule(focus_win)
 			end,
 		})
-	else
-		if win_id and vim.api.nvim_win_is_valid(win_id) then
-			vim.api.nvim_set_current_win(win_id)
-		end
 	end
+	focus_win()
+	vim.schedule(focus_win)
 
 	vim.api.nvim_create_autocmd("VimResized", {
 		group = vim.api.nvim_create_augroup("pack_ui_resize", { clear = true }),

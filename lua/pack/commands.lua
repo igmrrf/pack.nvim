@@ -70,7 +70,7 @@ function M.setup_user_command(pack_module)
 			end
 		elseif subcmd == "clean" then
 			local ok_get, managed = pcall(function()
-				return pack_module.native_pack.get and pack_module.native_pack.get() or {}
+				return pack_module.native_pack.get and pack_module.native_pack.get(nil, { info = false }) or {}
 			end)
 			if not ok_get then
 				managed = {}

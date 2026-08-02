@@ -51,7 +51,7 @@ function M.trigger_summary(p)
 	return #parts > 0 and table.concat(parts, " ") or nil
 end
 
-function M.quick_detail_lines(p)
+function M.metadata_lines(p)
 	local lines = {}
 	table.insert(lines, "dir:      " .. (p.dir ~= "" and p.dir or "(not installed)"))
 	table.insert(lines, "url:      " .. p.url)
@@ -69,17 +69,53 @@ function M.quick_detail_lines(p)
 		table.insert(lines, "triggers: " .. triggers)
 	end
 	if p.dependencies and #p.dependencies > 0 then
-		table.insert(lines, "deps:     " .. table.concat(p.dependencies, ", "))
+		local dep_names = {}
+		for _, dep in ipairs(p.dependencies) do
+			if type(dep) == "string" then
+				table.insert(dep_names, dep)
+			elseif type(dep) == "table" then
+				local name = dep.name or dep[1] or dep.src
+				table.insert(dep_names, type(name) == "string" and name or tostring(name))
+			else
+				table.insert(dep_names, tostring(dep))
+			end
+		end
+		if #dep_names > 0 then
+			table.insert(lines, "deps:     " .. table.concat(dep_names, ", "))
+		end
 	end
 
 	if p.category then
-		table.insert(lines, "category: " .. p.category)
+		table.insert(lines, "category: " .. tostring(p.category))
 	end
 	if p.tags and #p.tags > 0 then
-		table.insert(lines, "tags:     " .. table.concat(p.tags, ", "))
+		local tag_names = {}
+		for _, tag in ipairs(p.tags) do
+			table.insert(tag_names, tostring(tag))
+		end
+		if #tag_names > 0 then
+			table.insert(lines, "tags:     " .. table.concat(tag_names, ", "))
+		end
+	end
+	if p.status == "building" and p.build_progress then
+		table.insert(lines, string.format("build:    step %d/%d: %s", p.build_progress.current, p.build_progress.total, p.build_progress.desc))
 	end
 
 	return lines
+end
+
+function M.quick_detail_lines(p)
+	local is_busy = p and (p.status == "building" or p.status == "installing" or p.status == "updating" or p.checking == true)
+	if is_busy and p.log and #p.log > 0 then
+		local lines = { "log:" }
+		local start_idx = math.max(1, #p.log - 7)
+		for i = start_idx, #p.log do
+			table.insert(lines, "  " .. tostring(p.log[i]))
+		end
+		return lines
+	end
+
+	return M.metadata_lines(p)
 end
 
 function M.add_plugin_details(p, lines, highlights, indent, expanded_plugins, plugin_map)
@@ -206,15 +242,24 @@ function M.render_all_tab(
 				if p.behind and p.behind > 0 then
 					outdated_sign = string.format("  ↺ %d commit%s behind", p.behind, p.behind > 1 and "s" or "")
 				end
+				local build_status = ""
+				if p.status == "building" then
+					if p.build_progress then
+						build_status = string.format("  [%d/%d: %s]", p.build_progress.current, p.build_progress.total, p.build_progress.desc)
+					elseif p.last_build_line then
+						build_status = string.format("  (%s)", p.last_build_line)
+					end
+				end
 				local tag = (p.managed == false) and "  (native)" or ""
 				local line = string.format(
-					"    %s%s %s %s%s%s%s",
+					"    %s%s %s %s%s%s%s%s",
 					sel_prefix,
 					expand_icon,
 					icon,
 					p.name,
 					time_str,
 					outdated_sign,
+					build_status,
 					tag
 				)
 				table.insert(lines, line)

@@ -129,4 +129,95 @@ function M.repair(opt_dir)
 	return fixed
 end
 
+-- Write or update a single plugin entry in nvim-pack-lock.json.
+function M.update_entry(name, src, dir)
+	local lock = M.read() or { version = 1, plugins = {} }
+	lock.plugins = lock.plugins or {}
+
+	local rev = head_rev(dir)
+	lock.plugins[name] = {
+		src = src,
+		rev = rev or "",
+	}
+
+	local ok, encoded = pcall(vim.json.encode, lock, { indent = "  ", sort_keys = true })
+	if not ok then
+		return false
+	end
+
+	local path = M.path()
+	local parent = vim.fs.dirname(path)
+	if parent and vim.fn.isdirectory(parent) == 0 then
+		vim.fn.mkdir(parent, "p")
+	end
+
+	local tmp = path .. ".tmp"
+	local write_ok = pcall(vim.fn.writefile, vim.split(encoded, "\n"), tmp)
+	if not write_ok then
+		pcall(vim.fn.delete, tmp)
+		return false
+	end
+	local uv = vim.uv or vim.loop
+	pcall(function()
+		local ok_ren, ren_err = uv.fs_rename(tmp, path)
+		if not ok_ren then
+			os.remove(path)
+			assert(uv.fs_rename(tmp, path), ren_err)
+		end
+	end)
+	return true
+end
+
+-- Ensure all on-disk plugins are registered in nvim-pack-lock.json so native
+-- vim.pack.add recognizes them as installed instead of trying to re-clone/wipe them.
+function M.ensure_synced(plugins_map)
+	local lock = M.read() or { version = 1, plugins = {} }
+	lock.plugins = lock.plugins or {}
+	local dirty = false
+
+	for name, p in pairs(plugins_map) do
+		if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir) == 1 and p.url and p.url ~= "" then
+			if not lock.plugins[name] then
+				local rev = head_rev(p.dir)
+				lock.plugins[name] = {
+					src = p.url,
+					rev = rev or "",
+				}
+				dirty = true
+			end
+		end
+	end
+
+	if not dirty then
+		return true
+	end
+
+	local ok, encoded = pcall(vim.json.encode, lock, { indent = "  ", sort_keys = true })
+	if not ok then
+		return false
+	end
+
+	local path = M.path()
+	local parent = vim.fs.dirname(path)
+	if parent and vim.fn.isdirectory(parent) == 0 then
+		vim.fn.mkdir(parent, "p")
+	end
+
+	local tmp = path .. ".tmp"
+	local write_ok = pcall(vim.fn.writefile, vim.split(encoded, "\n"), tmp)
+	if not write_ok then
+		pcall(vim.fn.delete, tmp)
+		return false
+	end
+	local uv = vim.uv or vim.loop
+	pcall(function()
+		local ok_ren, ren_err = uv.fs_rename(tmp, path)
+		if not ok_ren then
+			os.remove(path)
+			assert(uv.fs_rename(tmp, path), ren_err)
+		end
+	end)
+	return true
+end
+
 return M

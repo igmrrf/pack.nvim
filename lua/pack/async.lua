@@ -16,14 +16,6 @@ M.git_timeout = 60000
 -- plugin's status from "updating" (guards against native emitting no event).
 M.update_recover_ms = 30000
 
-local function append_log(plugin, line)
-	plugin.log = plugin.log or {}
-	table.insert(plugin.log, line)
-	if #plugin.log > M.max_log_lines then
-		table.remove(plugin.log, 1)
-	end
-end
-
 local ui_update_timer = nil
 
 local function ui_update()
@@ -39,6 +31,38 @@ local function ui_update()
 			require("pack.ui").update()
 		end
 	end, 50)
+end
+
+local function get_progress_prefix(line)
+	if type(line) ~= "string" then return nil end
+	local trimmed = vim.trim(line)
+	local prefix = trimmed:match("^(remote:%s*[^:]+:)")
+	if prefix then return prefix end
+	if trimmed:match("^Cloning into") then return "Cloning into" end
+	if trimmed:match("^%s*%d+%%") or trimmed:match("^%[%s*%d+%%") then
+		return "progress_percent"
+	end
+	return nil
+end
+
+local function append_log(plugin, line)
+	if not line or line == "" then return end
+	plugin.log = plugin.log or {}
+	local new_prefix = get_progress_prefix(line)
+	if new_prefix and #plugin.log > 0 then
+		local last_line = plugin.log[#plugin.log]
+		local last_prefix = get_progress_prefix(last_line)
+		if last_prefix and last_prefix == new_prefix then
+			plugin.log[#plugin.log] = line
+			ui_update()
+			return
+		end
+	end
+	table.insert(plugin.log, line)
+	if #plugin.log > M.max_log_lines then
+		table.remove(plugin.log, 1)
+	end
+	ui_update()
 end
 
 local git_mod = require("pack.async.git")
@@ -215,6 +239,26 @@ function M.check_all_outdated()
 			done()
 		end)
 	end, M.max_concurrency)
+end
+
+function M.install_missing_plugins(specs, confirm, done_cb)
+	done_cb = done_cb or function() end
+	if not specs or #specs == 0 then
+		return done_cb()
+	end
+
+	local pack = require("pack")
+	local loader = require("pack.loader")
+	local delegate = require("pack.delegate")
+	local chunks = delegate.chunk_array(specs, 10)
+
+	for _, chunk in ipairs(chunks) do
+		local ok, err = pcall(pack.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+		if not ok then
+			vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+		end
+	end
+	done_cb()
 end
 
 function M.run_build_hook(plugin, done_cb)

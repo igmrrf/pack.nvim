@@ -7,17 +7,42 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 	for _, a in ipairs(args) do
 		cmd[#cmd + 1] = a
 	end
-	local ok, err = pcall(vim.system, cmd, { cwd = cwd, text = true, timeout = git_timeout }, function(res)
+
+	local accumulated = {}
+	local line_buffer = ""
+
+	local function handle_chunk(data)
+		if not data then return end
+		table.insert(accumulated, data)
+		line_buffer = line_buffer .. data
+		while true do
+			local pos = line_buffer:find("[\r\n]")
+			if not pos then break end
+			local line = line_buffer:sub(1, pos - 1)
+			line_buffer = line_buffer:sub(pos + 1)
+			if line ~= "" then
+				local captured_line = line
+				vim.schedule(function()
+					append_log_fn(plugin, captured_line)
+				end)
+			end
+		end
+	end
+
+	local ok, err = pcall(vim.system, cmd, {
+		cwd = cwd,
+		text = true,
+		timeout = git_timeout,
+		stdout = function(_, data) handle_chunk(data) end,
+		stderr = function(_, data) handle_chunk(data) end,
+	}, function(res)
 		vim.schedule(function()
-			local out = res.stdout or ""
-			local combined = out
-			if res.stderr and res.stderr ~= "" then
-				combined = combined .. "\n" .. res.stderr
+			if line_buffer ~= "" then
+				append_log_fn(plugin, line_buffer)
+				line_buffer = ""
 			end
-			for line in combined:gmatch("[^\r\n]+") do
-				append_log_fn(plugin, line)
-			end
-			on_done(res.code, out)
+			local combined_out = table.concat(accumulated)
+			on_done(res.code, combined_out)
 		end)
 	end)
 	if not ok then

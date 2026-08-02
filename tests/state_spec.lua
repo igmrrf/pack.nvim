@@ -50,6 +50,15 @@ describe("pack.state", function()
     assert.is_true(persist.load()["foo.nvim"])
   end)
 
+  it("remove_plugin clears plugin from state and removes disabled entry from persist json", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    state.set_disabled("foo.nvim", true)
+    assert.is_true(persist.load()["foo.nvim"])
+    state.remove_plugin("foo.nvim")
+    assert.is_nil(state.get_plugins()["foo.nvim"])
+    assert.is_nil(persist.load()["foo.nvim"])
+  end)
+
   it("set_behind stores the commit-behind count and a timestamp", function()
     state.init(config_with({ "user/foo.nvim" }))
     state.set_behind("foo.nvim", 3)
@@ -275,6 +284,25 @@ describe("pack.state", function()
     assert.is_true(p["cmdplug.nvim"].lazy)
     assert.is_true(p["keyplug.nvim"].lazy)
     assert.is_false(p["eagerplug.nvim"].lazy)
+  end)
+
+  it("reconciles plugin loaded status directly when entry.active is present", function()
+    state.init(config_with({ "user/foo.nvim" }))
+    local fake_path = vim.fs.normalize(vim.fn.tempname() .. "/foo.nvim")
+    vim.fn.mkdir(fake_path, "p")
+    vim.opt.rtp:append(fake_path)
+    local mock_native = {
+      get = function()
+        return {
+          { spec = { name = "foo.nvim", src = "https://github.com/user/foo.nvim" }, path = fake_path, active = true }
+        }
+      end,
+    }
+    state.reconcile_from_native(mock_native)
+    local p = state.get_plugins()["foo.nvim"]
+    assert.equals("loaded", p.status)
+    vim.opt.rtp:remove(fake_path)
+    vim.fn.delete(fake_path, "rf")
   end)
 end)
 

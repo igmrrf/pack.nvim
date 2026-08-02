@@ -116,6 +116,7 @@ function M.add_plugin(p, config)
 end
 
 function M.remove_plugin(name)
+	persist.set_disabled(name, false)
 	if M.plugins[name] then
 		M.plugins[name] = nil
 		M.generation = M.generation + 1

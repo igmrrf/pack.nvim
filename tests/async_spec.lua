@@ -382,6 +382,26 @@ describe("pack.async.run_build_hook", function()
     assert.same({ "a", "b" }, order)
     assert.equals(1, done_count, "done must be called once for a list of hooks")
   end)
+
+  it("streams shell build output and tracks step progress in real time", function()
+    local dir = vim.fn.tempname() .. "-build-stream"
+    vim.fn.mkdir(dir, "p")
+    local p = {
+      name = "stream-fixture.nvim",
+      dir = dir,
+      status = "installed",
+      log = {},
+      build = { "echo line1", "echo line2" },
+    }
+    local done = false
+    async.run_build_hook(p, function() done = true end)
+    assert.is_true(vim.wait(2000, function() return done end, 10), "streaming build did not finish")
+    local log_text = table.concat(p.log, "\n")
+    assert.is_true(log_text:match("line1") ~= nil, "log should contain stdout line1")
+    assert.is_true(log_text:match("line2") ~= nil, "log should contain stdout line2")
+    assert.is_nil(p.build_progress, "build_progress should be cleared after completion")
+    vim.fn.delete(dir, "rf")
+  end)
 end)
 
 describe("pack.async.setup_build_hooks", function()

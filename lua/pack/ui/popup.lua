@@ -95,7 +95,7 @@ function M.show_full_details(p, current_tab)
 	end
 
 	local lines = { "  " .. p.name, "  " .. string.rep("=", #p.name), "" }
-	for _, dl in ipairs(render.quick_detail_lines(p)) do
+	for _, dl in ipairs(render.metadata_lines(p)) do
 		table.insert(lines, "  " .. dl)
 	end
 
@@ -267,6 +267,11 @@ function M.show_log(p)
 		if not plugin_is_busy(state.get_plugins()[p.name]) then
 			M.update_log()
 			pcall(vim.fn.timer_stop, timer)
+			local target_p = state.get_plugins()[p.name] or p
+			if vim.api.nvim_win_is_valid(win) then
+				pcall(vim.api.nvim_win_close, win, true)
+				M.show_full_details(target_p)
+			end
 		end
 	end, { ["repeat"] = -1 })
 	return buf, win

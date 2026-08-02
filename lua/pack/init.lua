@@ -25,25 +25,69 @@ M.config = {
 	},
 }
 
--- Silence native Neovim `vim.pack` cmdline notifications (e.g. "vim.pack: 100% updating")
+local function should_silence(msg)
+	if type(msg) ~= "string" then
+		return false
+	end
+	return msg:match("^vim%.pack") ~= nil
+		or msg:match("vim%.pack%.") ~= nil
+		or msg:find("vim.pack", 1, true) ~= nil
+		or msg:match("^Submodule%s+'") ~= nil
+		or msg:find("registered for path", 1, true) ~= nil
+		or msg:match("^Cloning into%s+'") ~= nil
+		or msg:find("Cloning into", 1, true) ~= nil
+end
+
+-- Silence native Neovim `vim.pack` cmdline notifications and stdout print/echo messages
 -- when silent=true or when auto_open=true (where dashboard float is the indicator).
-if not _G.__pack_silent_notify_hooked then
-	_G.__pack_silent_notify_hooked = true
+if not _G.__pack_silent_hooks_installed then
+	_G.__pack_silent_hooks_installed = true
+
 	local orig_notify = vim.notify
 	vim.notify = function(msg, level, opts)
 		local is_silent = (M.config and M.config.ui and M.config.ui.silent ~= nil) and M.config.ui.silent
 			or (M.config and M.config.ui and M.config.ui.auto_open ~= false)
 
-		if
-			is_silent
-			and (
-				(opts and opts.title == "vim.pack")
-				or (type(msg) == "string" and (msg:match("^vim%.pack") or msg:match("vim%.pack%.updating")))
-			)
-		then
-			return
+		if is_silent then
+			if opts and opts.title == "vim.pack" then
+				return
+			end
+			if should_silence(msg) then
+				return
+			end
 		end
 		return orig_notify(msg, level, opts)
+	end
+
+	local orig_print = print
+	_G.print = function(...)
+		local is_silent = (M.config and M.config.ui and M.config.ui.silent ~= nil) and M.config.ui.silent
+			or (M.config and M.config.ui and M.config.ui.auto_open ~= false)
+
+		if is_silent then
+			local args = { ... }
+			for _, arg in ipairs(args) do
+				if should_silence(arg) then
+					return
+				end
+			end
+		end
+		return orig_print(...)
+	end
+
+	local orig_echo = vim.api.nvim_echo
+	vim.api.nvim_echo = function(chunks, history, opts)
+		local is_silent = (M.config and M.config.ui and M.config.ui.silent ~= nil) and M.config.ui.silent
+			or (M.config and M.config.ui and M.config.ui.auto_open ~= false)
+
+		if is_silent and type(chunks) == "table" then
+			for _, chunk in ipairs(chunks) do
+				if type(chunk) == "table" and type(chunk[1]) == "string" and should_silence(chunk[1]) then
+					return
+				end
+			end
+		end
+		return orig_echo(chunks, history, opts)
 	end
 end
 
@@ -82,28 +126,63 @@ end
 -- loader. Native never touches runtimepath - we own all loading.
 function M._install_and_load(native_specs, confirm)
 	if M.native_pack and M.native_pack.add and #native_specs > 0 then
-		local has_uninstalled = false
+		local missing_specs = {}
+		local installed_specs = {}
+
 		for _, spec in ipairs(native_specs) do
 			local p = state.find_plugin(spec.name, spec.src)
 			if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
-                state.update_status(p.name, "installing")
-				has_uninstalled = true
-				break
+				state.update_status(p.name, "installing")
+				table.insert(missing_specs, spec)
+			else
+				table.insert(installed_specs, spec)
 			end
 		end
 
-		local auto_open = M.config and M.config.ui and (M.config.ui.auto_open ~= false)
-		if has_uninstalled and auto_open and package.loaded["pack.ui"] then
-			pcall(function()
-				require("pack.ui").open(M.config)
-			end)
+		if #installed_specs > 0 then
+			local chunks = chunk_array(installed_specs, 10)
+			for _, chunk in ipairs(chunks) do
+				local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+				if not ok then
+					vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+				end
+			end
 		end
 
-		local chunks = chunk_array(native_specs, 10)
-		for _, chunk in ipairs(chunks) do
-			local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm })
-			if not ok then
-				vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+		if #missing_specs > 0 then
+			local do_install_missing = function()
+				local auto_open = M.config and M.config.ui and (M.config.ui.auto_open ~= false)
+				if auto_open then
+					pcall(function()
+						require("pack.ui").open(M.config, { auto_opened = true })
+					end)
+				end
+
+				local chunks = chunk_array(missing_specs, 10)
+				for _, chunk in ipairs(chunks) do
+					local ok, err = pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+					if not ok then
+						vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+					end
+				end
+
+				loader.flush_pending()
+				if package.loaded["pack.ui"] then
+					pcall(function()
+						require("pack.ui").update({ jump_to_first = true })
+					end)
+				end
+			end
+
+			if vim.v.vim_did_init == 0 then
+				vim.api.nvim_create_autocmd("VimEnter", {
+					once = true,
+					callback = function()
+						vim.defer_fn(do_install_missing, 50)
+					end,
+				})
+			else
+				do_install_missing()
 			end
 		end
 	end
@@ -227,20 +306,26 @@ function M.setup(opts)
 	vim.pack.add = function(specs)
 		M.add(specs)
 	end
-	vim.pack.del = function(names)
+	vim.pack.del = function(names, opts)
 		if type(names) == "string" then
 			names = { names }
 		end
+		opts = vim.tbl_extend("force", { force = true }, opts or {})
 		for _, name in ipairs(names) do
 			local p = state.get_plugins()[name]
 			if p then
 				pcall(function()
 					loader.remove_triggers(p)
 				end)
+				if p.dir and vim.fn.isdirectory(p.dir) == 1 then
+					pcall(vim.fn.delete, p.dir, "rf")
+				end
 				state.remove_plugin(name)
 			end
 		end
-		native_call("del", M.native_pack.del, names)
+		if type(M.native_pack.del) == "function" then
+			pcall(M.native_pack.del, names, opts)
+		end
 	end
 	vim.pack.update = function(names, update_opts)
 		native_call("update", M.native_pack.update, names, update_opts)

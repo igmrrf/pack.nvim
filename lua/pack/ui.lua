@@ -12,7 +12,10 @@ local config_ref = nil
 local plugin_map = {}
 local ns_id = vim.api.nvim_create_namespace("pack")
 local expanded_plugins = {}
+local auto_expanded = {}
 local initial_focus = false
+local was_installing = false
+local auto_opened_for_install = false
 
 local selected_plugins = {}
 local current_tab = "all"
@@ -21,6 +24,14 @@ local show_select_ui = false
 
 local tabbar_mod = require("pack.ui.render.tabbar")
 local TAB_ORDER = tabbar_mod.TAB_ORDER
+
+function M.close()
+	if win_id and vim.api.nvim_win_is_valid(win_id) then
+		pcall(vim.api.nvim_win_close, win_id, true)
+		win_id = nil
+		buf_id = nil
+	end
+end
 
 function M.ensure_spinner()
 	spinner_mod.ensure_spinner(buf_id, function()
@@ -135,11 +146,11 @@ function M.update_log()
 end
 
 function M.sync_one()
-	return actions_mod.sync_one(plugin_at_cursor, M.update)
+	return actions_mod.sync_one(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
 end
 
 function M.delete_one()
-	return actions_mod.delete_one(plugin_at_cursor, function() selected_plugins = {} end, M.update)
+	return actions_mod.delete_one(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
 end
 
 function M.toggle_select()
@@ -205,7 +216,8 @@ end
 
 local window_mod = require("pack.ui.window")
 
-function M.open(config)
+function M.open(config, opts)
+	opts = opts or {}
 	config_ref = config
 	search_term = ""
 	selected_plugins = {}
@@ -218,8 +230,10 @@ function M.open(config)
 		return
 	end
 
+	auto_opened_for_install = (opts.auto_opened == true)
 	current_tab = "all"
 	expanded_plugins = {}
+	auto_expanded = {}
 
 	buf_id, win_id = window_mod.create_window(config, function()
 		M.update()
@@ -227,7 +241,9 @@ function M.open(config)
 
 	initial_focus = true
 	M.update()
-	require("pack.async").check_all_outdated()
+	vim.schedule(function()
+		require("pack.async").check_all_outdated()
+	end)
 end
 
 function M.update(opts)
@@ -266,7 +282,27 @@ function M.update(opts)
 		table.insert(lines, "")
 	end
 
+	local just_finished_install = was_installing and not is_active
+	was_installing = is_active
+
+	if just_finished_install and auto_opened_for_install then
+		auto_opened_for_install = false
+		vim.schedule(function()
+			M.close()
+		end)
+	end
+
 	tabbar_mod.render_tab_bar(lines, highlights, current_tab)
+
+	for _, p in pairs(state.get_plugins()) do
+		local is_busy = (p.status == "building" or p.status == "installing" or p.status == "updating")
+		if is_busy and expanded_plugins[p.name] == nil then
+			expanded_plugins[p.name] = true
+			auto_expanded[p.name] = true
+		elseif not is_busy and auto_expanded[p.name] then
+			auto_expanded[p.name] = nil
+		end
+	end
 
 	if current_tab == "all" then
 		render.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
@@ -287,41 +323,42 @@ function M.update(opts)
 			local line_text = lines[h.line + 1]
 			end_col = line_text and #line_text or h.col_start
 		end
-		pcall(vim.api.nvim_buf_set_extmark, buf_id, ns_id, h.line, h.col_start, {
-			end_col = end_col,
-			hl_group = h.hl,
-		})
+		pcall(vim.api.nvim_buf_add_highlight, buf_id, ns_id, h.hl, h.line, h.col_start, end_col)
 	end
 
 	if cursor and win_id and vim.api.nvim_win_is_valid(win_id) then
-		local placed = false
-		if prev_plugin_name and not (initial_focus or opts.jump_to_first) then
+		local should_jump = initial_focus or opts.jump_to_first
+
+		if should_jump then
+			local placed = false
 			for i = 1, #lines do
-				local p = plugin_map[i]
-				if p and p.name == prev_plugin_name then
+				if plugin_map[i] then
 					cursor[1] = i
 					placed = true
 					break
 				end
 			end
-		end
-		if (not placed and (initial_focus or opts.jump_to_first)) or (initial_focus or opts.jump_to_first) then
-			for i = 1, #lines do
-				if plugin_map[i] then
-					cursor[1] = i
-					initial_focus = false
-					break
-				end
+			if not placed then
+				cursor[1] = 1
+			end
+		else
+			if cursor[1] > #lines then
+				cursor[1] = math.max(1, #lines)
+			end
+			if cursor[1] < 1 then
+				cursor[1] = 1
 			end
 		end
 
-		if cursor[1] > #lines then
-			cursor[1] = #lines
-		end
-		if cursor[1] < 1 then
-			cursor[1] = 1
-		end
 		pcall(vim.api.nvim_win_set_cursor, win_id, cursor)
+		if should_jump then
+			pcall(vim.api.nvim_win_call, win_id, function()
+				vim.cmd("normal! zt")
+			end)
+		end
+		if initial_focus then
+			initial_focus = false
+		end
 	end
 
 	M.update_log()

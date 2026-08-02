@@ -83,8 +83,8 @@ describe("pack.ui", function()
   end)
 
   describe("details popups", function()
-    it("toggle_details expands details inline", function()
-      local config = config_with({ "user/foo.nvim" })
+    it("toggle_details does not error for a plugin with a multi-entry keys table", function()
+      local config = config_with({ { "user/foo.nvim", keys = { { "<leader>f", "find" }, { "<leader>g", "grep" } } } })
       state.init(config)
       ui.open(config)
       local buf = vim.api.nvim_get_current_buf()
@@ -94,7 +94,21 @@ describe("pack.ui", function()
       ui.toggle_details()
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local text = table.concat(lines, "\n")
-      assert.is_true(text:match("url:      ") ~= nil)
+      assert.is_true(text:match("triggers: ") ~= nil)
+    end)
+
+    it("toggle_details handles table dependencies without erroring on concat", function()
+      local config = config_with({ { "user/foo.nvim", dependencies = { { "nvim-neotest/neotest-plenary" } } } })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line = find_line(buf, "foo%.nvim")
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+
+      ui.toggle_details()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local text = table.concat(lines, "\n")
+      assert.is_true(text:match("deps:     nvim%-neotest/neotest%-plenary") ~= nil)
     end)
 
     it("show_full_details reports no commit info for a non-git directory", function()
@@ -254,6 +268,60 @@ describe("pack.ui", function()
       local text2 = table.concat(vim.api.nvim_buf_get_lines(log_buf, 0, -1, false), "\n")
       assert.is_true(text2:match("done") ~= nil, "live log did not pick up new line")
       assert.equals(log_buf, vim.api.nvim_get_current_buf())
+    end)
+
+    it("defaults to open (expanded inline) for installing/building plugins and renders logs inline", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      local p = state.get_plugins()["foo.nvim"]
+      p.status = "building"
+      p.log = { "$ make", "compiling foo..." }
+      ui.open(config)
+
+      local dash_buf = vim.api.nvim_get_current_buf()
+      -- Must not open a popup automatically, dashboard remains focused
+      assert.equals(dash_buf, vim.api.nvim_get_current_buf())
+
+      local text = table.concat(vim.api.nvim_buf_get_lines(dash_buf, 0, -1, false), "\n")
+      assert.is_true(text:match("log:") ~= nil, "logs must be rendered inline")
+      assert.is_true(text:match("compiling foo%.%.%.") ~= nil, "log lines must appear inline in dashboard")
+    end)
+
+    it("auto switches back to details after a log process completes", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      local p = state.get_plugins()["foo.nvim"]
+      p.status = "building"
+      p.log = { "$ make", "compiling foo..." }
+      ui.open(config)
+
+      local dash_buf = vim.api.nvim_get_current_buf()
+      local text1 = table.concat(vim.api.nvim_buf_get_lines(dash_buf, 0, -1, false), "\n")
+      assert.is_true(text1:match("log:") ~= nil)
+
+      p.status = "installed"
+      ui.update()
+
+      local text2 = table.concat(vim.api.nvim_buf_get_lines(dash_buf, 0, -1, false), "\n")
+      assert.is_nil(text2:match("log:"), "should no longer display log: header after build completes")
+      assert.is_true(text2:match("url:      https://github.com/user/foo.nvim") ~= nil, "should auto switch back to displaying plugin details")
+    end)
+
+    it("closes auto-opened dashboard after missing plugins finish installing", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      local p = state.get_plugins()["foo.nvim"]
+      p.status = "installing"
+      ui.open(config, { auto_opened = true })
+
+      local win = vim.api.nvim_get_current_win()
+      assert.is_true(vim.api.nvim_win_is_valid(win))
+
+      p.status = "installed"
+      ui.update()
+      vim.wait(100)
+
+      assert.is_false(vim.api.nvim_win_is_valid(win), "auto-opened dashboard should close after install completes")
     end)
   end)
 
@@ -906,6 +974,32 @@ describe("pack.ui", function()
       assert.equals(1, #deleted_names)
       assert.equals("foo.nvim", deleted_names[1])
       assert.equals(nil, state.get_plugins()["foo.nvim"])
+    end)
+
+    it("deletes all selected plugins when multiple are selected and delete_one is triggered", function()
+      local config = config_with({ "user/foo.nvim", "user/bar.nvim" })
+      state.init(config)
+      ui.open(config)
+      local buf = vim.api.nvim_get_current_buf()
+      local line1 = find_line(buf, "foo.nvim")
+      vim.api.nvim_win_set_cursor(0, { line1, 0 })
+      ui.toggle_select()
+      local line2 = find_line(buf, "bar.nvim")
+      vim.api.nvim_win_set_cursor(0, { line2, 0 })
+      ui.toggle_select()
+
+      local deleted_names = nil
+      local orig_del = vim.pack.del
+      vim.pack.del = function(names)
+        deleted_names = names
+      end
+
+      ui.delete_one()
+      vim.pack.del = orig_del
+
+      assert.equals(2, #deleted_names)
+      assert.equals(nil, state.get_plugins()["foo.nvim"])
+      assert.equals(nil, state.get_plugins()["bar.nvim"])
     end)
 
     it("displays tab-tailored popup details with K", function()

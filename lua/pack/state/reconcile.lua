@@ -21,18 +21,28 @@ function M.reconcile_from_native(plugins, native_pack, incr_generation_cb)
 	if not (native_pack and native_pack.get) then
 		return
 	end
-	local ok, list = pcall(native_pack.get)
+	local ok, list = pcall(native_pack.get, nil, { info = false })
 	if not ok or type(list) ~= "table" then
 		return
 	end
 
-	local rtp = {}
-	for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
-		rtp[vim.fs.normalize(path)] = true
+	local rtp = nil
+	local function get_rtp()
+		if not rtp then
+			rtp = {}
+			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+				rtp[vim.fs.normalize(path)] = true
+			end
+		end
+		return rtp
 	end
 
 	local function is_active(entry)
-		if not (entry.path and entry.path ~= "" and rtp[vim.fs.normalize(entry.path)] == true) then
+		if not (entry.path and entry.path ~= "") then
+			return false
+		end
+		local r = get_rtp()
+		if not r[vim.fs.normalize(entry.path)] then
 			return false
 		end
 		if entry.active ~= nil then
