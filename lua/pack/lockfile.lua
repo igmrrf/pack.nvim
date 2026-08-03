@@ -158,13 +158,17 @@ function M.update_entry(name, src, dir)
 		return false
 	end
 	local uv = vim.uv or vim.loop
-	pcall(function()
+	local rename_ok = pcall(function()
 		local ok_ren, ren_err = uv.fs_rename(tmp, path)
 		if not ok_ren then
 			os.remove(path)
 			assert(uv.fs_rename(tmp, path), ren_err)
 		end
 	end)
+	if not rename_ok then
+		pcall(vim.fn.delete, tmp)
+		return false
+	end
 	return true
 end
 
@@ -210,13 +214,17 @@ function M.ensure_synced(plugins_map)
 		return false
 	end
 	local uv = vim.uv or vim.loop
-	pcall(function()
+	local rename_ok = pcall(function()
 		local ok_ren, ren_err = uv.fs_rename(tmp, path)
 		if not ok_ren then
 			os.remove(path)
 			assert(uv.fs_rename(tmp, path), ren_err)
 		end
 	end)
+	if not rename_ok then
+		pcall(vim.fn.delete, tmp)
+		return false
+	end
 	return true
 end
 

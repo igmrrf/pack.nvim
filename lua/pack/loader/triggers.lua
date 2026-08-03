@@ -129,15 +129,35 @@ function M.setup_triggers(p, load_cb)
 			vim.api.nvim_create_user_command(cmd, function(args)
 				vim.api.nvim_del_user_command(cmd)
 				load_cb(p.name)
-				local cmd_str = cmd
-				if args.args and args.args ~= "" then
-					cmd_str = cmd_str .. " " .. args.args
+				local cmd_opts = {
+					cmd = cmd,
+					args = args.fargs,
+					bang = args.bang,
+					mods = args.smods,
+				}
+				if args.range == 2 then
+					cmd_opts.range = { args.line1, args.line2 }
+				elseif args.range == 1 then
+					cmd_opts.range = { args.line1 }
 				end
-				if args.bang then
-					cmd_str = cmd_str .. "!"
+				if args.count and args.count ~= -1 then
+					cmd_opts.count = args.count
 				end
-				pcall(vim.cmd, cmd_str)
-			end, { nargs = "*", bang = true, complete = "file", force = true })
+				if args.reg and args.reg ~= "" then
+					cmd_opts.reg = args.reg
+				end
+				local ok = pcall(vim.cmd, cmd_opts)
+				if not ok then
+					local cmd_str = cmd
+					if args.args and args.args ~= "" then
+						cmd_str = cmd_str .. " " .. args.args
+					end
+					if args.bang then
+						cmd_str = cmd_str .. "!"
+					end
+					pcall(vim.cmd, cmd_str)
+				end
+			end, { nargs = "*", range = true, bang = true, complete = "file", force = true })
 		end
 	end
 

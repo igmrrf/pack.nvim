@@ -55,6 +55,10 @@ function M.resolve_plugin(modname)
 			map[name:gsub("-", "_")] = map[name:gsub("-", "_")] or p
 			map[base] = map[base] or p
 			map[base:gsub("-", "_")] = map[base:gsub("-", "_")] or p
+			if p.module and type(p.module) == "string" then
+				map[p.module] = map[p.module] or p
+				map[p.module:gsub("-", "_")] = map[p.module:gsub("-", "_")] or p
+			end
 			local head = base:match("^([^.]+)")
 			if head and head ~= base then
 				map[head] = map[head] or p

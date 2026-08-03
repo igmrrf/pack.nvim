@@ -25,17 +25,22 @@ M.config = {
 	},
 }
 
+M._in_pack_op = false
+
 local function should_silence(msg)
 	if type(msg) ~= "string" then
 		return false
 	end
-	return msg:match("^vim%.pack") ~= nil
-		or msg:match("vim%.pack%.") ~= nil
-		or msg:find("vim.pack", 1, true) ~= nil
-		or msg:match("^Submodule%s+'") ~= nil
-		or msg:find("registered for path", 1, true) ~= nil
-		or msg:match("^Cloning into%s+'") ~= nil
-		or msg:find("Cloning into", 1, true) ~= nil
+	if msg:match("^vim%.pack") ~= nil or msg:match("vim%.pack%.") ~= nil or msg:find("vim.pack", 1, true) ~= nil then
+		return true
+	end
+	if M._in_pack_op then
+		return msg:match("^Submodule%s+'") ~= nil
+			or msg:find("registered for path", 1, true) ~= nil
+			or msg:match("^Cloning into%s+'") ~= nil
+			or msg:find("Cloning into", 1, true) ~= nil
+	end
+	return false
 end
 
 -- Silence native Neovim `vim.pack` cmdline notifications and stdout print/echo messages
@@ -142,8 +147,10 @@ function M._install_and_load(native_specs, confirm)
 		if #installed_specs > 0 then
 			local chunks = chunk_array(installed_specs, 10)
 			for _, chunk in ipairs(chunks) do
+				M._in_pack_op = true
 				local ok, err =
 					pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+				M._in_pack_op = false
 				if not ok then
 					vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 				end
@@ -161,8 +168,10 @@ function M._install_and_load(native_specs, confirm)
 
 				local chunks = chunk_array(missing_specs, 10)
 				for _, chunk in ipairs(chunks) do
+					M._in_pack_op = true
 					local ok, err =
 						pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+					M._in_pack_op = false
 					if not ok then
 						vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 					end
@@ -246,7 +255,9 @@ local function native_call(desc, fn, ...)
 		vim.notify("pack: native vim.pack." .. desc .. " is unavailable", vim.log.levels.ERROR)
 		return false
 	end
+	M._in_pack_op = true
 	local ok, err = pcall(fn, ...)
+	M._in_pack_op = false
 	if not ok then
 		vim.notify("pack: " .. desc .. " failed: " .. tostring(err), vim.log.levels.ERROR)
 	end

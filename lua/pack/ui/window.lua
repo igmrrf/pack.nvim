@@ -82,6 +82,16 @@ function M.create_window(config, update_ui_cb)
 		end,
 	})
 
+	vim.api.nvim_create_autocmd("BufWipeout", {
+		buffer = buf_id,
+		once = true,
+		callback = function()
+			pcall(function()
+				require("pack.ui").close()
+			end)
+		end,
+	})
+
 	local opts = { buffer = buf_id, noremap = true, silent = true, nowait = true }
 	vim.keymap.set("n", "q", "<Cmd>close<CR>", opts)
 	vim.keymap.set("n", "?", "<Cmd>lua require('pack.ui').show_help()<CR>", opts)

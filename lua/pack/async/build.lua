@@ -31,7 +31,10 @@ local function run_build_step(plugin, hook, append_log_fn, cb)
 					local p1 = plugin.dir .. "/lua/?.lua"
 					local p2 = plugin.dir .. "/lua/?/init.lua"
 					if not package.path:find(p1, 1, true) then
-						package.path = package.path .. ";" .. p1 .. ";" .. p2
+						package.path = package.path .. ";" .. p1
+					end
+					if not package.path:find(p2, 1, true) then
+						package.path = package.path .. ";" .. p2
 					end
 				end
 				if plugin.name then
