@@ -287,7 +287,7 @@ describe("pack.ui", function()
       assert.is_true(text:match("compiling foo%.%.%.") ~= nil, "log lines must appear inline in dashboard")
     end)
 
-    it("auto switches back to details after a log process completes", function()
+    it("auto closes details after a log process completes", function()
       local config = config_with({ "user/foo.nvim" })
       state.init(config)
       local p = state.get_plugins()["foo.nvim"]
@@ -304,7 +304,7 @@ describe("pack.ui", function()
 
       local text2 = table.concat(vim.api.nvim_buf_get_lines(dash_buf, 0, -1, false), "\n")
       assert.is_nil(text2:match("log:"), "should no longer display log: header after build completes")
-      assert.is_true(text2:match("url:      https://github.com/user/foo.nvim") ~= nil, "should auto switch back to displaying plugin details")
+      assert.is_nil(text2:match("url:      https://github.com/user/foo.nvim"), "should auto close plugin details entirely")
     end)
 
     it("closes auto-opened dashboard after missing plugins finish installing", function()
