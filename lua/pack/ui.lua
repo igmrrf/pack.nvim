@@ -321,6 +321,7 @@ function M.update(opts)
 			auto_expanded[p.name] = true
 		elseif not is_busy and auto_expanded[p.name] then
 			auto_expanded[p.name] = nil
+			expanded_plugins[p.name] = nil
 		end
 	end
 
