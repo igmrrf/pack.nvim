@@ -17,7 +17,7 @@ jobs:
         id: changelog
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          NOTES=$(awk "/^## \\\[$VERSION\\\]/ {flag=1; next} /^## \\\[/ {if (flag) {flag=0; exit}} flag" CHANGELOG.md)
+          NOTES=$(awk -v ver="## [$VERSION]" 'index($0, ver) == 1 {flag=1; next} /^## \[/ {if (flag) exit} flag' CHANGELOG.md)
           EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
           echo "notes<<$EOF" >> "$GITHUB_OUTPUT"
           echo "$NOTES" >> "$GITHUB_OUTPUT"
