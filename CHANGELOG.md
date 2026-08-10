@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-10
+### Changed
+- Upgraded the automated release workflow to cleanly parse the changelog without syntax errors on standard runner environments.
+
+### Fixed
+- Updated tests to accurately reflect the new UI behavior where details blocks completely close upon completion of background plugin tasks.
+
 ## [0.1.1] - 2026-08-10
 ### Added
 - `.luarc.json` configuration file for Neovim lua development.
