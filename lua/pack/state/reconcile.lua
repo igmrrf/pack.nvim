@@ -30,7 +30,7 @@ function M.reconcile_from_native(plugins, native_pack, incr_generation_cb)
 	local function get_rtp()
 		if not rtp then
 			rtp = {}
-			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+			for _, path in ipairs(vim.opt.rtp:get()) do
 				rtp[vim.fs.normalize(path)] = true
 			end
 		end

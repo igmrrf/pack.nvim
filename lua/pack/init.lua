@@ -166,23 +166,40 @@ function M._install_and_load(native_specs, confirm)
 					end)
 				end
 
-				local chunks = chunk_array(missing_specs, 10)
-				for _, chunk in ipairs(chunks) do
+				local i = 1
+				local function process_next()
+					if i > #missing_specs then
+						loader.flush_pending()
+						if package.loaded["pack.ui"] then
+							pcall(function()
+								require("pack.ui").update({ jump_to_first = true })
+							end)
+						end
+						return
+					end
+
 					M._in_pack_op = true
 					local ok, err =
-						pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+						pcall(M.native_pack.add, { missing_specs[i] }, { load = loader.load_fn, confirm = confirm, silent = true })
 					M._in_pack_op = false
 					if not ok then
 						vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 					end
-				end
 
-				loader.flush_pending()
-				if package.loaded["pack.ui"] then
-					pcall(function()
-						require("pack.ui").update({ jump_to_first = true })
-					end)
+					if package.loaded["pack.ui"] then
+						pcall(function()
+							require("pack.ui").update()
+						end)
+					end
+
+					i = i + 1
+					if #vim.api.nvim_list_uis() == 0 then
+						process_next()
+					else
+						vim.defer_fn(process_next, 10)
+					end
 				end
+				process_next()
 			end
 
 			if vim.v.vim_did_init == 0 then
@@ -371,7 +388,7 @@ function M.status()
 	local function get_rtp()
 		if not rtp then
 			rtp = {}
-			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+			for _, path in ipairs(vim.opt.rtp:get()) do
 				rtp[vim.fs.normalize(path)] = true
 			end
 		end
@@ -416,7 +433,7 @@ function M.picker()
 	local function get_rtp()
 		if not rtp then
 			rtp = {}
-			for _, path in ipairs(vim.api.nvim_list_runtime_paths()) do
+			for _, path in ipairs(vim.opt.rtp:get()) do
 				rtp[vim.fs.normalize(path)] = true
 			end
 		end

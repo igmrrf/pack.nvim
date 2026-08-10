@@ -76,7 +76,7 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 			plugin_map[#lines] = p
 
 			local commits = p.pending_commits
-			if not commits and p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+			if not commits and p.dir and p.dir ~= "" and vim.fn.isdirectory(vim.fs.joinpath(p.dir, ".git")) == 1 then
 				local git_out = vim.fn.system({ "git", "-C", p.dir, "log", "-5", "--format=%h %s (%cr)" })
 				if vim.v.shell_error == 0 and vim.trim(git_out) ~= "" then
 					commits = {}

@@ -82,7 +82,7 @@ function M.add_plugin(p, config)
 		-- computing it here lets us show an accurate status before add() runs.
 		-- A local (`dir=`) plugin already carries its own on-disk path -- keep it.
 		if not norm.is_local then
-			norm.dir = M.native_opt_dir() .. "/" .. norm.name
+			norm.dir = vim.fs.joinpath(M.native_opt_dir(), norm.name)
 		else
 			norm.dir = norm.local_dir
 		end

@@ -249,16 +249,25 @@ function M.install_missing_plugins(specs, confirm, done_cb)
 
 	local pack = require("pack")
 	local loader = require("pack.loader")
-	local delegate = require("pack.delegate")
-	local chunks = delegate.chunk_array(specs, 10)
+	local i = 1
+	local function install_next()
+		if i > #specs then
+			done_cb()
+			return
+		end
 
-	for _, chunk in ipairs(chunks) do
-		local ok, err = pcall(pack.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+		pack._in_pack_op = true
+		local ok, err = pcall(pack.native_pack.add, { specs[i] }, { load = loader.load_fn, confirm = confirm, silent = true })
+		pack._in_pack_op = false
+		
 		if not ok then
 			vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 		end
+
+		i = i + 1
+		vim.defer_fn(install_next, 10)
 	end
-	done_cb()
+	install_next()
 end
 
 function M.run_build_hook(plugin, done_cb)
@@ -346,17 +355,36 @@ function M.update_plugins(names)
 		ui_update()
 	end
 
-	local ok, err = pcall(pack.native_pack.update, names, { force = true })
-	if not ok then
-		vim.notify("pack: update failed: " .. tostring(err), vim.log.levels.ERROR)
-		recover(false)
-		return
+	local i = 1
+	local function update_next()
+		if i > #names then
+			-- Fallback timer for the no-event case; PackChanged(update) normally restores
+			-- status well before this fires.
+			vim.defer_fn(function()
+				recover(true)
+			end, M.update_recover_ms)
+			return
+		end
+
+		pack._in_pack_op = true
+		local ok, err = pcall(pack.native_pack.update, { names[i] }, { force = true, silent = true })
+		pack._in_pack_op = false
+		
+		if not ok then
+			vim.notify("pack: update failed for " .. names[i] .. ": " .. tostring(err), vim.log.levels.ERROR)
+			local p = plugins[names[i]]
+			if p and p.status == "updating" then
+				state.update_status(names[i], p.status_before_update or "installed")
+				p.status_before_update = nil
+				p._update_had_pending = nil
+				p._update_ticks = nil
+			end
+		end
+
+		i = i + 1
+		vim.defer_fn(update_next, 10)
 	end
-	-- Fallback timer for the no-event case; PackChanged(update) normally restores
-	-- status well before this fires.
-	vim.defer_fn(function()
-		recover(true)
-	end, M.update_recover_ms)
+	update_next()
 end
 
 return M

@@ -135,7 +135,7 @@ function M.show_full_details(p, current_tab)
 		table.insert(lines, "  -------------------------")
 
 		local commit_line = "(no commit info available)"
-		if p.dir and p.dir ~= "" and vim.fn.isdirectory(p.dir .. "/.git") == 1 then
+		if p.dir and p.dir ~= "" and vim.fn.isdirectory(vim.fs.joinpath(p.dir, ".git")) == 1 then
 			local branch = vim.fn.system({ "git", "-C", p.dir, "rev-parse", "--abbrev-ref", "HEAD" })
 			if vim.v.shell_error == 0 and branch ~= "" then
 				table.insert(lines, "  branch:   " .. vim.trim(branch))

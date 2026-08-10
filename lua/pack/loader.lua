@@ -30,8 +30,8 @@ local function gen_helptags(dir)
 	if not dir or dir == "" then
 		return
 	end
-	local doc = dir .. "/doc"
-	if vim.fn.isdirectory(doc) == 1 and #vim.fn.globpath(doc, "*.txt", true, true) > 0 then
+	local doc = vim.fs.joinpath(dir, "doc")
+	if vim.fn.isdirectory(doc) == 1 and #vim.fs.find(function(name) return name:match("%.txt$") end, { path = doc, type = "file", limit = 1 }) > 0 then
 		pcall(vim.cmd, "helptags " .. vim.fn.fnameescape(doc))
 	end
 end
@@ -53,8 +53,10 @@ local function load_local(p)
 		return false
 	end
 	vim.opt.runtimepath:append(p.dir)
-	for _, pat in ipairs({ "plugin/**/*.vim", "plugin/**/*.lua" }) do
-		for _, file in ipairs(vim.fn.globpath(p.dir, pat, true, true)) do
+	local plugin_dir = vim.fs.joinpath(p.dir, "plugin")
+	if vim.fn.isdirectory(plugin_dir) == 1 then
+		local files = vim.fs.find(function(name) return name:match("%.vim$") or name:match("%.lua$") end, { path = plugin_dir, type = "file", limit = math.huge })
+		for _, file in ipairs(files) do
 			local ok, err = pcall(vim.cmd, "source " .. vim.fn.fnameescape(file))
 			if not ok then
 				vim.notify("pack: error sourcing " .. file .. ": " .. tostring(err), vim.log.levels.ERROR)

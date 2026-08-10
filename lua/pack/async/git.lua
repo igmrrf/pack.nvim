@@ -3,13 +3,11 @@ local M = {}
 -- Run a git command asynchronously.
 function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_done)
 	append_log_fn(plugin, "$ git " .. table.concat(args, " "))
-	local cmd = { "git" }
-	for _, a in ipairs(args) do
-		cmd[#cmd + 1] = a
-	end
+	local cmd = vim.iter({ { "git" }, args }):flatten():totable()
 
 	local accumulated = {}
 	local line_buffer = ""
+	local safe_append = vim.schedule_wrap(append_log_fn)
 
 	local function handle_chunk(data)
 		if not data then return end
@@ -21,10 +19,7 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 			local line = line_buffer:sub(1, pos - 1)
 			line_buffer = line_buffer:sub(pos + 1)
 			if line ~= "" then
-				local captured_line = line
-				vim.schedule(function()
-					append_log_fn(plugin, captured_line)
-				end)
+				safe_append(plugin, line)
 			end
 		end
 	end
@@ -38,7 +33,7 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 	}, function(res)
 		vim.schedule(function()
 			if line_buffer ~= "" then
-				append_log_fn(plugin, line_buffer)
+				safe_append(plugin, line_buffer)
 				line_buffer = ""
 			end
 			local combined_out = table.concat(accumulated)
@@ -46,7 +41,7 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 		end)
 	end)
 	if not ok then
-		append_log_fn(plugin, "failed to spawn git: " .. tostring(err))
+		safe_append(plugin, "failed to spawn git: " .. tostring(err))
 		vim.schedule(function()
 			on_done(-1, "")
 		end)
@@ -87,11 +82,7 @@ function M.parse_pending_commits(output)
 	if type(output) ~= "string" or output == "" then
 		return {}
 	end
-	local commits = {}
-	for line in output:gmatch("([^\r\n]+)") do
-		table.insert(commits, line)
-	end
-	return commits
+	return vim.iter(output:gmatch("([^\r\n]+)")):totable()
 end
 
 function M.upstream_ref(plugin, dir, git_fn, cb)

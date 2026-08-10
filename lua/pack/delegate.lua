@@ -37,9 +37,9 @@ function M.load_plugins(spec)
 	local files = {}
 
 	local user_config_dir = vim.fn.stdpath("config")
-	local user_path = user_config_dir .. "/lua/" .. path
+	local user_path = vim.fs.joinpath(user_config_dir, "lua", path)
 	if vim.fn.isdirectory(user_path) == 1 then
-		files = vim.fn.glob(user_path .. "/**/*.lua", false, true)
+		files = vim.fs.find(function(name) return name:match("%.lua$") end, { path = user_path, type = "file", limit = math.huge })
 	end
 
 	if #files == 0 then

@@ -26,10 +26,10 @@ local function run_build_step(plugin, hook, append_log_fn, cb)
 			append_log_fn(plugin, "$ " .. hook)
 			if plugin.dir and vim.fn.isdirectory(plugin.dir) == 1 then
 				vim.opt.rtp:append(plugin.dir)
-				local lua_dir = plugin.dir .. "/lua"
+				local lua_dir = vim.fs.joinpath(plugin.dir, "lua")
 				if vim.fn.isdirectory(lua_dir) == 1 then
-					local p1 = plugin.dir .. "/lua/?.lua"
-					local p2 = plugin.dir .. "/lua/?/init.lua"
+					local p1 = vim.fs.joinpath(plugin.dir, "lua/?.lua")
+					local p2 = vim.fs.joinpath(plugin.dir, "lua/?/init.lua")
 					if not package.path:find(p1, 1, true) then
 						package.path = package.path .. ";" .. p1
 					end
@@ -41,7 +41,7 @@ local function run_build_step(plugin, hook, append_log_fn, cb)
 					local guard_name = "loaded_" .. plugin.name:gsub("[^%w_]", "_")
 					vim.g[guard_name] = nil
 				end
-				local plugin_dir = plugin.dir .. "/plugin"
+				local plugin_dir = vim.fs.joinpath(plugin.dir, "plugin")
 				if vim.fn.isdirectory(plugin_dir) == 1 then
 					local files = vim.fs.find(function(name, _)
 						return name:match("%.lua$") or name:match("%.vim$")
@@ -238,7 +238,7 @@ function M.setup_build_hooks(run_build_hook_fn, append_log_fn)
 				end
 			end
 
-			if d.kind == "install" and p.dir and vim.fn.filereadable(p.dir .. "/.gitmodules") == 1 then
+			if d.kind == "install" and p.dir and vim.fn.filereadable(vim.fs.joinpath(p.dir, ".gitmodules")) == 1 then
 				append_log_fn(p, "$ git submodule update --init --recursive")
 				local ok = pcall(
 					vim.system,
