@@ -159,6 +159,7 @@ describe("pack.init native delegation", function()
     -- the dashboard IS the confirmation -- so it passes force=true (and targets
     -- the managed plugins explicitly, driving the dashboard's own progress).
     do_setup({ "user/foo.nvim" })
+    state.get_plugins()["foo.nvim"].behind = 1
     vim.cmd("Pack sync")
     local last = fake.updated[#fake.updated]
     assert.same({ "foo.nvim" }, last.names)
