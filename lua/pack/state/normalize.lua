@@ -33,19 +33,8 @@ function M.derive_name(spec)
 	local url = spec[1] or spec.src
 	local match_name = type(url) == "string" and url:match("/([^/]+)$") or nil
 	local name = spec.as or spec.name or (match_name and match_name or url)
-	if type(name) == "string" then
-		if name:sub(-4) == ".git" then
-			name = name:sub(1, -5)
-		end
-		if name:sub(-5) == ".nvim" then
-			name = name:sub(1, -6)
-		end
-		if name:sub(-4) == ".vim" then
-			name = name:sub(1, -5)
-		end
-		if name:sub(-4) == ".lua" then
-			name = name:sub(1, -5)
-		end
+	if type(name) == "string" and name:sub(-4) == ".git" then
+		name = name:sub(1, -5)
 	end
 	return name
 end
