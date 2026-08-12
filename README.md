@@ -126,7 +126,7 @@ Plugin specifications can be defined as shorthand strings (`"owner/repo"`), tabl
 | `dependencies` | `table` | List of dependent plugin specs loaded prior to this plugin. |
 | `init` | `fun(plugin)` | Callback executed BEFORE the plugin is loaded (useful for setting `vim.g` options). |
 | `opts` | `table` | Options table automatically passed to `require(main).setup(opts)`. |
-| `config` | `fun(plugin, opts)` | Custom callback executed AFTER the plugin is loaded (overrides default `opts` behavior). |
+| `config` | `fun(plugin, opts)\|true` | Custom callback executed AFTER the plugin is loaded (overrides default `opts` behavior). If `true`, invokes `setup()` without arguments. |
 | `build` | `string\|fun(plugin)` | Shell command or Lua function executed post-install / update. |
 | `branch` | `string` | Track a specific git branch. |
 | `tag` | `string` | Pin to a specific git tag. |

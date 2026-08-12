@@ -62,6 +62,15 @@ function M.add_plugin(p, config)
 		end
 
 		local prev = M.plugins[norm.name]
+		if not prev and norm.url then
+			for _, existing_plug in pairs(M.plugins) do
+				if existing_plug.url and existing_plug.url:lower() == norm.url:lower() then
+					prev = existing_plug
+					break
+				end
+			end
+		end
+
 		if prev and prev.managed and not prev.implicit then
 			goto continue
 		end
@@ -94,6 +103,9 @@ function M.add_plugin(p, config)
 		end
 
 		if prev then
+			if prev.name and prev.name ~= norm.name then
+				M.plugins[prev.name] = nil
+			end
 			-- Upgrade the adopted/implicit stub in place so any table already
 			-- holding a reference to `prev` (e.g. a caller's return value) stays valid.
 			for k in pairs(prev) do
@@ -102,6 +114,7 @@ function M.add_plugin(p, config)
 			for k, v in pairs(norm) do
 				prev[k] = v
 			end
+			M.plugins[norm.name] = prev
 			table.insert(added_list, prev)
 		else
 			M.plugins[norm.name] = norm

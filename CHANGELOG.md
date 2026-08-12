@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-08-13
+### Changed
+- Plugin normalization `derive_name` now strips common suffixes (`.nvim`, `.lua`, `.vim`) by default to yield cleaner base plugin names.
+- Plugin registration now de-duplicates by URL to gracefully merge explicitly named plugins with implicit dependency specifications.
+- The `Sync` (`S`) dashboard action and `:Pack sync` command now exclusively update plugins known to be outdated (`behind > 0`), rather than attempting to redundantly update all non-missing plugins.
+
+### Fixed
+- Fixed an issue where `config = true` crashed during initialization. It now correctly falls back to invoking the `setup` function parameter-less, maintaining equivalence to `opts = {}`.
+- Fixed dashboard duplication for `.nvim` suffixed packages caused by implicit dependency entries taking precedence over renamed explicit config specs.
+
 ## [0.1.2] - 2026-08-10
 ### Changed
 - Upgraded the automated release workflow to cleanly parse the changelog without syntax errors on standard runner environments.

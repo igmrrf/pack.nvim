@@ -99,7 +99,7 @@ supported for each plugin spec:
   dependencies   (table) Dependent plugin specs.
   init           (function) Callback executed before plugin load.
   opts           (table) Options table passed to `require(main).setup(opts)`.
-  config         (function) Custom callback executed after plugin load.
+  config         (function|boolean) Custom callback executed after plugin load. If `true`, invokes `setup()` without arguments.
   build          (string|function) Shell command or Lua function executed
                  post-install/update.
   branch         (string) Git branch to pin.

@@ -181,33 +181,55 @@ function M.sync_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, upd
 		return
 	end
 
-	local to_install = {}
-	local to_update = {}
-	for _, p in ipairs(targets) do
-		if not p.disabled then
-			if p.status == "missing" then
-				local ns = state.to_native_spec(p)
-				if ns then
-					table.insert(to_install, ns)
-				end
-			else
-				table.insert(to_update, p.name)
+	local function do_sync(notified)
+		local checking = false
+		for _, p in ipairs(targets) do
+			if p.checking then
+				checking = true
+				break
 			end
+		end
+
+		if checking then
+			if not notified then
+				vim.notify("pack: Waiting for plugin checks to finish before syncing...", vim.log.levels.INFO)
+			end
+			vim.defer_fn(function()
+				do_sync(true)
+			end, 200)
+			return
+		end
+
+		local to_install = {}
+		local to_update = {}
+		for _, p in ipairs(targets) do
+			if not p.disabled then
+				if p.status == "missing" then
+					local ns = state.to_native_spec(p)
+					if ns then
+						table.insert(to_install, ns)
+					end
+				elseif p.behind and p.behind > 0 then
+					table.insert(to_update, p.name)
+				end
+			end
+		end
+
+		if #to_install > 0 then
+			require("pack")._install_and_load(to_install, false)
+		end
+		if #to_update > 0 then
+			require("pack.async").update_plugins(to_update)
+		end
+		if clear_select_cb then
+			clear_select_cb()
+		end
+		if update_ui_cb then
+			update_ui_cb()
 		end
 	end
 
-	if #to_install > 0 then
-		require("pack")._install_and_load(to_install, false)
-	end
-	if #to_update > 0 then
-		require("pack.async").update_plugins(to_update)
-	end
-	if clear_select_cb then
-		clear_select_cb()
-	end
-	if update_ui_cb then
-		update_ui_cb()
-	end
+	do_sync(false)
 end
 
 function M.delete_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, update_ui_cb)

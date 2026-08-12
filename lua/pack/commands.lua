@@ -13,25 +13,48 @@ function M.setup_user_command(pack_module)
 		local target = args_list[2]
 
 		if subcmd == "sync" then
-			local to_install, to_update = {}, {}
-			for name, p in pairs(state.get_plugins()) do
-				if not p.disabled and p.managed ~= false and not p.is_local then
-					if p.status == "missing" then
-						local ns = state.to_native_spec(p)
-						if ns then
-							to_install[#to_install + 1] = ns
+			local function do_sync(notified)
+				local checking = false
+				for _, p in pairs(state.get_plugins()) do
+					if not p.disabled and p.managed ~= false and not p.is_local then
+						if p.checking then
+							checking = true
+							break
 						end
-					else
-						to_update[#to_update + 1] = name
 					end
 				end
+
+				if checking then
+					if not notified then
+						vim.notify("pack: Waiting for plugin checks to finish before syncing...", vim.log.levels.INFO)
+					end
+					vim.defer_fn(function()
+						do_sync(true)
+					end, 200)
+					return
+				end
+
+				local to_install, to_update = {}, {}
+				for name, p in pairs(state.get_plugins()) do
+					if not p.disabled and p.managed ~= false and not p.is_local then
+						if p.status == "missing" then
+							local ns = state.to_native_spec(p)
+							if ns then
+								to_install[#to_install + 1] = ns
+							end
+						elseif p.behind and p.behind > 0 then
+							to_update[#to_update + 1] = name
+						end
+					end
+				end
+				if #to_install > 0 then
+					pack_module._install_and_load(to_install, false)
+				end
+				if #to_update > 0 then
+					require("pack.async").update_plugins(to_update)
+				end
 			end
-			if #to_install > 0 then
-				pack_module._install_and_load(to_install, false)
-			end
-			if #to_update > 0 then
-				require("pack.async").update_plugins(to_update)
-			end
+			do_sync(false)
 		elseif subcmd == "update" then
 			if target then
 				if state.get_plugins()[target] then
