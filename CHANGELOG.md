@@ -16,8 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A plugin pinned with a lazy.nvim-style `version` range (e.g. `version = "*"`) whose repo has no tagged releases no longer fails installation with "No versions fit constraint"; pack.nvim retries without the version constraint and tracks the default branch instead, isolating the retry to only the offending plugin in a batch.
 - Background installs no longer call native `vim.pack.add` after a successful clone (it would look up a lockfile entry it doesn't have cached yet and try to re-clone); the plugin now loads directly for the session and native adopts it from the lockfile on the next startup.
 - Concurrent background clones could clobber each other's lockfile entry when a blocking `git rev-parse HEAD` call interleaved with another clone's write; lockfile writes are now serialized.
-- `:Pack update`/`U`/`S` no longer re-targets a plugin that is already mid-install or mid-update, which previously could clobber its in-flight status.
+- `:Pack update`/`U`/`S` no longer re-targets a plugin that is already mid-install or mid-build, which previously could clobber its in-flight status.
 - A failed load after a successful background clone is now reported and marks the plugin as errored instead of leaving it silently stuck at "installing".
+
+## [0.1.6] - 2026-08-25
+### Fixed
+
+- `S`, `s`, and `:Pack sync` now also update installed/loaded plugins that have never been checked for outdated status (`behind == nil`), instead of silently skipping them until an explicit outdated check (`c`, or opening the Updates tab) had run first.
 
 ## [0.1.4] - 2026-08-25
 ### Added

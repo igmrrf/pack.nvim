@@ -487,11 +487,14 @@ end
 -- native vim.pack.update pass runs afterwards purely to reconcile the
 -- lockfile/state once HEAD has already moved -- keeping the UI responsive
 -- during large updates.
+-- Statuses owned by a DIFFERENT pipeline (install/build) than update_plugins
+-- itself. Deliberately excludes "queued_update"/"updating": those are
+-- update_plugins' own states, and re-invoking it on a name already mid-update
+-- is long-standing, tested behavior (native handles a redundant update call
+-- fine) -- only cross-pipeline clobbering needs guarding against here.
 local BUSY_STATUSES = {
 	queued = true,
-	queued_update = true,
 	installing = true,
-	updating = true,
 	building = true,
 }
 
@@ -504,7 +507,7 @@ function M.update_plugins(names)
 		return
 	end
 
-	-- Drop anything already mid-install/mid-update: it has no stable "current
+	-- Drop anything already mid-install/mid-build: it has no stable "current
 	-- status" to capture into status_before_update, and targeting it here would
 	-- stomp whatever operation already has it in flight -- e.g. a plugin still
 	-- being cloned by the install pump would get clobbered to "queued_update",

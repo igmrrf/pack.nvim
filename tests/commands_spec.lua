@@ -40,6 +40,64 @@ describe("Pack user commands and subcommands", function()
     require("pack.async").update_plugins = orig_update
   end)
 
+  it(":Pack sync includes never-checked (behind == nil) installed plugins, not just confirmed-outdated ones", function()
+    -- Nobody has run an outdated check yet: behind is nil, not 0. Sync must
+    -- not silently skip these -- that's exactly what made `S`/:Pack sync look
+    -- like it did nothing for freshly-added or never-checked plugins.
+    state.get_plugins()["foo.nvim"].status = "loaded"
+    state.get_plugins()["foo.nvim"].behind = nil
+    state.get_plugins()["bar.nvim"].status = "installed"
+    state.get_plugins()["bar.nvim"].behind = nil
+
+    local updated_names = nil
+    local orig_update = require("pack.async").update_plugins
+    require("pack.async").update_plugins = function(names)
+      updated_names = names
+    end
+
+    vim.cmd("Pack sync")
+    require("pack.async").update_plugins = orig_update
+
+    table.sort(updated_names or {})
+    assert.same({ "bar.nvim", "foo.nvim" }, updated_names, "never-checked plugins must still be synced")
+  end)
+
+  it(":Pack sync excludes a plugin already confirmed up to date (behind == 0)", function()
+    state.get_plugins()["foo.nvim"].status = "loaded"
+    state.get_plugins()["foo.nvim"].behind = 0
+    state.get_plugins()["bar.nvim"].status = "loaded"
+    state.get_plugins()["bar.nvim"].behind = nil
+
+    local updated_names = nil
+    local orig_update = require("pack.async").update_plugins
+    require("pack.async").update_plugins = function(names)
+      updated_names = names
+    end
+
+    vim.cmd("Pack sync")
+    require("pack.async").update_plugins = orig_update
+
+    assert.same({ "bar.nvim" }, updated_names, "a plugin confirmed up to date must not be re-synced")
+  end)
+
+  it(":Pack sync excludes a plugin that failed to install, even with behind == nil", function()
+    state.get_plugins()["foo.nvim"].status = "error"
+    state.get_plugins()["foo.nvim"].behind = nil
+    state.get_plugins()["bar.nvim"].status = "loaded"
+    state.get_plugins()["bar.nvim"].behind = nil
+
+    local updated_names = nil
+    local orig_update = require("pack.async").update_plugins
+    require("pack.async").update_plugins = function(names)
+      updated_names = names
+    end
+
+    vim.cmd("Pack sync")
+    require("pack.async").update_plugins = orig_update
+
+    assert.same({ "bar.nvim" }, updated_names, "an errored plugin must not be swept into sync's update batch")
+  end)
+
   it("runs :Pack update and :Pack update <target>", function()
     local updated_names = nil
     local orig_native = pack.native_pack.update

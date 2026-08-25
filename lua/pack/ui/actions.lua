@@ -209,7 +209,9 @@ function M.sync_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, upd
 					if ns then
 						table.insert(to_install, ns)
 					end
-				elseif p.behind and p.behind > 0 then
+				elseif (p.status == "installed" or p.status == "loaded") and (p.behind == nil or p.behind > 0) then
+					-- behind == nil means never checked -- sync must not silently skip
+					-- it just because no one has run an outdated check yet.
 					table.insert(to_update, p.name)
 				end
 			end

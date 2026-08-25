@@ -958,6 +958,26 @@ describe("pack.ui", function()
       assert.equals("foo.nvim", installed_specs[1].name)
     end)
 
+    it("syncs a never-checked (behind == nil) installed plugin with the s keymap", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      -- Installed but nobody has run an outdated check on it: behind is nil,
+      -- not 0. `s` must still attempt an update instead of silently no-op'ing.
+      state.update_status("foo.nvim", "loaded")
+      ui.open(config)
+
+      local updated_names = nil
+      local orig_update = require("pack.async").update_plugins
+      require("pack.async").update_plugins = function(names)
+        updated_names = names
+      end
+
+      ui.sync_one()
+      require("pack.async").update_plugins = orig_update
+
+      assert.same({ "foo.nvim" }, updated_names)
+    end)
+
     it("deletes single cursor plugin with d keymap", function()
       local config = config_with({ "user/foo.nvim" })
       state.init(config)

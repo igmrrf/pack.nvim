@@ -145,7 +145,10 @@ describe("pack.async update batching", function()
     for _, name in ipairs(names) do
       state.set_behind(name, 1)
     end
-    state.get_plugins()[names[1]].status = "updating"
+    -- "installing" (install-pipeline state), not "updating": update_plugins
+    -- must still be free to re-target a name already mid-*update* (tested
+    -- elsewhere) -- only cross-pipeline clobbering is guarded against here.
+    state.get_plugins()[names[1]].status = "installing"
 
     local calls = {}
     local orig_update = pack.native_pack.update
