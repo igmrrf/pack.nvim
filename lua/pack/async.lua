@@ -401,6 +401,14 @@ function M.install_via_git(spec, done)
 			)
 			return fail()
 		end
+
+		local function success()
+			pcall(function()
+				require("pack.lockfile").update_entry(spec.name, spec.src, dir)
+			end)
+			done(true)
+		end
+
 		-- Commit pin: check out the exact revision after a default clone.
 		if version and version:match(SHA_PATTERN) then
 			begin_activity()
@@ -413,11 +421,11 @@ function M.install_via_git(spec, done)
 					)
 					return fail()
 				end
-				done(true)
+				success()
 			end)
 			return
 		end
-		done(true)
+		success()
 	end)
 end
 
