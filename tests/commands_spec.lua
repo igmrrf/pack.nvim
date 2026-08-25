@@ -98,6 +98,32 @@ describe("Pack user commands and subcommands", function()
     assert.same({ "bar.nvim" }, updated_names, "an errored plugin must not be swept into sync's update batch")
   end)
 
+  it(":Pack sync notifies instead of silently doing nothing when everything is up to date", function()
+    state.get_plugins()["foo.nvim"].status = "loaded"
+    state.get_plugins()["foo.nvim"].behind = 0
+    state.get_plugins()["bar.nvim"].status = "loaded"
+    state.get_plugins()["bar.nvim"].behind = 0
+
+    local infos = {}
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.INFO then
+        table.insert(infos, tostring(msg))
+      end
+    end
+
+    vim.cmd("Pack sync")
+    vim.notify = orig_notify
+
+    local found = false
+    for _, msg in ipairs(infos) do
+      if msg:find("up to date", 1, true) then
+        found = true
+      end
+    end
+    assert.is_true(found, "sync must notify when there is nothing to install or update")
+  end)
+
   it("runs :Pack update and :Pack update <target>", function()
     local updated_names = nil
     local orig_native = pack.native_pack.update

@@ -978,6 +978,33 @@ describe("pack.ui", function()
       assert.same({ "foo.nvim" }, updated_names)
     end)
 
+    it("notifies instead of silently doing nothing when the synced plugin is already up to date", function()
+      local config = config_with({ "user/foo.nvim" })
+      state.init(config)
+      state.update_status("foo.nvim", "loaded")
+      state.set_behind("foo.nvim", 0)
+      ui.open(config)
+
+      local infos = {}
+      local orig_notify = vim.notify
+      vim.notify = function(msg, level)
+        if level == vim.log.levels.INFO then
+          table.insert(infos, tostring(msg))
+        end
+      end
+
+      ui.sync_one()
+      vim.notify = orig_notify
+
+      local found = false
+      for _, msg in ipairs(infos) do
+        if msg:find("up to date", 1, true) then
+          found = true
+        end
+      end
+      assert.is_true(found, "sync_one must notify when the target is already up to date")
+    end)
+
     it("deletes single cursor plugin with d keymap", function()
       local config = config_with({ "user/foo.nvim" })
       state.init(config)

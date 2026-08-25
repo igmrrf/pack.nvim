@@ -56,6 +56,9 @@ function M.setup_user_command(pack_module)
 				if #to_update > 0 then
 					require("pack.async").update_plugins(to_update)
 				end
+				if #to_install == 0 and #to_update == 0 then
+					vim.notify("pack: everything is up to date", vim.log.levels.INFO)
+				end
 			end
 			do_sync(false)
 		elseif subcmd == "update" then

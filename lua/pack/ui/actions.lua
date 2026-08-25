@@ -223,6 +223,11 @@ function M.sync_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, upd
 		if #to_update > 0 then
 			require("pack.async").update_plugins(to_update)
 		end
+		if #to_install == 0 and #to_update == 0 then
+			local msg = (#targets == 1) and ("pack: '" .. targets[1].name .. "' is already up to date")
+				or "pack: selected plugins are already up to date"
+			vim.notify(msg, vim.log.levels.INFO)
+		end
 		if clear_select_cb then
 			clear_select_cb()
 		end
