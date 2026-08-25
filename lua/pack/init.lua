@@ -175,76 +175,88 @@ function M._install_and_load(native_specs, confirm)
 				local use_git = M.config and M.config.use_git == true
 				local async = use_git and require("pack.async") or nil
 
-				local i = 1
-				local function process_next()
-					if i > #missing_specs then
-						loader.flush_pending()
-						if package.loaded["pack.ui"] then
-							pcall(function()
-								require("pack.ui").update({ jump_to_first = true })
-							end)
-						end
+				local total = #missing_specs
+				local idx = 0
+				local inflight = 0
+				local completed = 0
+				local pumping = false
+				local max_workers = async and async.max_concurrency or 1
+
+				local function finish_all()
+					loader.flush_pending()
+					if package.loaded["pack.ui"] then
+						pcall(function()
+							require("pack.ui").update({ jump_to_first = true })
+						end)
+					end
+				end
+
+				local function pump()
+					if pumping then
 						return
 					end
+					pumping = true
+					while inflight < max_workers and idx < total do
+						idx = idx + 1
+						inflight = inflight + 1
+						local spec = missing_specs[idx]
 
-					-- Advance to the next spec after this one settles. Headless runs
-					-- (no UI) continue synchronously; interactive ones pace with
-					-- defer_fn so the loop never hogs the main loop.
-					local function advance()
-						i = i + 1
-						if #vim.api.nvim_list_uis() == 0 then
-							process_next()
-						else
-							vim.defer_fn(process_next, 10)
-						end
-					end
-
-					local spec = missing_specs[i]
-					if async and async.bg_install_supported(spec) then
-						-- Non-blocking: clone in the background, then let native adopt
-						-- the finished directory (registers it + writes the lockfile).
-						async.install_via_git(spec, function(cloned)
-							if cloned then
-								-- The lockfile was written on disk by install_via_git, but native
-								-- vim.pack caches it in memory. If we call native_pack.add here,
-								-- it won't see the new entry and will crash trying to re-clone.
-								-- So we just load it directly for this session; native vim.pack
-								-- will adopt it from the updated lockfile on the next startup.
-								if loader.load_fn then
-									pcall(loader.load_fn, { spec = spec, path = vim.fs.joinpath(state.native_opt_dir(), spec.name) })
-								else
-									pcall(vim.cmd.packadd, spec.name)
-								end
-							else
-								state.update_status(spec.name, "error")
-							end
-
+						local function advance()
+							inflight = inflight - 1
+							completed = completed + 1
 							if package.loaded["pack.ui"] then
 								pcall(function()
 									require("pack.ui").update()
 								end)
 							end
-							advance()
-						end)
-					else
-						M._in_pack_op = true
-						local ok, err =
-							pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
-						M._in_pack_op = false
-						if not ok then
-							vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+							if completed == total then
+								finish_all()
+							else
+								vim.schedule(pump)
+							end
 						end
 
-						if package.loaded["pack.ui"] then
-							pcall(function()
-								require("pack.ui").update()
+						if async and async.bg_install_supported(spec) then
+							-- Non-blocking: clone in the background, then let native adopt
+							-- the finished directory (registers it + writes the lockfile).
+							async.install_via_git(spec, function(cloned)
+								if cloned then
+									-- The lockfile was written on disk by install_via_git, but native
+									-- vim.pack caches it in memory. If we call native_pack.add here,
+									-- it won't see the new entry and will crash trying to re-clone.
+									-- So we just load it directly for this session; native vim.pack
+									-- will adopt it from the updated lockfile on the next startup.
+									if loader.load_fn then
+										pcall(loader.load_fn, { spec = spec, path = vim.fs.joinpath(state.native_opt_dir(), spec.name) })
+									else
+										pcall(vim.cmd.packadd, spec.name)
+									end
+								else
+									state.update_status(spec.name, "error")
+								end
+								advance()
 							end)
+						else
+							M._in_pack_op = true
+							local ok, err =
+								pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
+							M._in_pack_op = false
+							if not ok then
+								vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+								state.update_status(spec.name, "error")
+							end
+							
+							-- Pace synchronous native installs so they don't lock the UI indefinitely
+							if #vim.api.nvim_list_uis() == 0 then
+								advance()
+							else
+								vim.defer_fn(advance, 10)
+							end
 						end
-
-						advance()
 					end
+					pumping = false
 				end
-				process_next()
+				pump()
 			end
 
 			if vim.v.vim_did_init == 0 then
