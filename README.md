@@ -15,11 +15,12 @@ Unlike traditional native pack managers (like `minpac` or `paq-nvim`), **pack.nv
 
 * **Native Backend:** All plugins install under `vim.pack`'s directory (`<stdpath("data")>/site/pack/core/opt`). Every plugin (lazy or not) is `packadd`-ed explicitly through pack rather than relying on Neovim's `start/` auto-load, so lazy loading and ordered eager loading are fully under pack's control.
 * **Native Git, Async Probes:** Clone / checkout / update / pinning are handled by native `vim.pack`. pack.nvim layers on non-blocking, **concurrency-limited** read-only git probes (via `vim.system`) purely to power the dashboard's "outdated" indicator and commit preview.
+* **Optional Background Git (`use_git`):** With `use_git = true`, installs and updates run as backgrounded `git` jobs (via `vim.system`), so the UI stays responsive during large transfers; native `vim.pack` then runs cheaply afterwards — with objects already local — purely to register plugins and keep the lockfile in sync. Bulk updates (`U`/`S`/`:Pack sync`/`:Pack update`) are batched at a maximum of 5 plugins per call.
 * **Interactive UI Dashboard:** A centralized floating window showing real-time plugin statuses, log streaming, and pending-commit previews for outdated plugins.
 * **Reproducible installs:** Version pinning (`branch` / `tag` / `commit` / semver `version` ranges) is resolved to a native `vim.pack` spec; native owns the lockfile, and `:Pack restore` rolls every plugin back to it.
 * **Persistent Disable State:** Disabling a plugin (via `x` in the dashboard or `set_disabled()`) persists state to `nvim-pack-extra.json` without editing your raw Lua config.
 * **Performance Caching:** Pre-compiles lazy plugins' `ftdetect` files into a single cache block, sourced at startup so their filetypes are detected before the plugin loads.
-* **Lazy Loading:** Supports `cmd`, `event` (with patterns), `ft` (filetype), and `keys` (keymap) triggers to load plugins right when you need them.
+* **Lazy Loading:** Supports `cmd`, `event` (with patterns), `ft` (filetype), and `keys` (keymap) triggers to load plugins right when you need them. When a spec sets both `ft` and `keys`, the keymaps are never bound globally — they exist only in buffers whose filetype matches, before and after the plugin loads.
 * **Modular Configuration:** Keep your config clean by using `{ import = "plugins" }` to split specs across multiple files.
 * **Fine-Grained Loading Control:** Toggle plugins with `enabled` or `cond`, and guarantee eager-load order using `priority`.
 * **Help Tags:** `:help` tags are generated automatically for every managed plugin's `doc/` directory on load.
@@ -45,6 +46,7 @@ require("pack").setup({
   performance = {
     vim_loader = true, -- Fallback to ensure vim.loader.enable() is called if omitted
   },
+  use_git = false, -- Clone/update via backgrounded `git` so the UI never blocks; native vim.pack still syncs the lockfile afterwards
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
     auto_open = true,  -- Automatically open dashboard float when uninstalled plugins exist
@@ -121,7 +123,7 @@ Plugin specifications can be defined as shorthand strings (`"owner/repo"`), tabl
 | `ft` | `string\|table` | Filetype(s) that trigger lazy loading. |
 | `event` | `string\|table` | Autocmd event(s) or pattern(s) that trigger lazy loading (e.g. `"BufReadPre"`). |
 | `pattern` | `string\|table` | Pattern filter string or table for autocmd `event` lazy triggers. |
-| `keys` | `string\|table` | Keymap shortcut(s) that trigger lazy loading or register keybindings. |
+| `keys` | `string\|table` | Keymap shortcut(s) that trigger lazy loading or register keybindings. Combined with `ft`, the keymaps are scoped buffer-locally to matching filetypes instead of being bound globally. |
 | `module` | `string` | Custom module name for `require()` trigger tracking. |
 | `dependencies` | `table` | List of dependent plugin specs loaded prior to this plugin. |
 | `init` | `fun(plugin)` | Callback executed BEFORE the plugin is loaded (useful for setting `vim.g` options). |
@@ -184,7 +186,7 @@ For full configuration examples and migration guides, see the [examples/](exampl
 |---|---|
 | `:Pack` | Opens the interactive dashboard UI to view current plugin status. |
 | `:Pack sync` | Updates all managed plugins via native `vim.pack`. |
-| `:Pack update [name]` | Updates a single plugin (or all plugins if no name is given). |
+| `:Pack update [names...]` | Updates the given plugins (any count; batched at most 5 per native call), or all plugins if no name is given. |
 | `:Pack clean` | Removes plugin directories no longer referenced in your configuration. |
 | `:Pack restore` | Rolls every plugin back to the native `vim.pack` lockfile. |
 | `:Pack repair` | Realigns lockfile (`nvim-pack-lock.json`) revisions to installed plugin HEAD commits. |
@@ -211,7 +213,7 @@ When inside the dashboard (opened via `:Pack`), you can use the following keymap
 
 *   `q` - Close the dashboard or any popup window.
 *   `?` - Show the interactive keymap help popup.
-*   `S` - Sync all managed plugins (install missing & pull updates).
+*   `S` - Sync all managed plugins (install missing & pull updates; batched at most 5 plugins per update call).
 *   `s` - Sync the single plugin under the cursor.
 *   `C` - Clean unmanaged/deleted plugin directories.
 *   `Tab` / `Shift-Tab` (or `1`/`2`/`3`) - Cycle or jump directly across dashboard tabs (Plugins -> Updates -> Disabled).
@@ -226,7 +228,7 @@ When inside the dashboard (opened via `:Pack`), you can use the following keymap
 *   `x` - Toggle disable/enable for the plugin under the cursor. An already-loaded plugin requires a Neovim restart to fully unload.
 *   `c` - Check for outdated plugins (concurrency-limited `git fetch`).
 *   `u` - Update the selected or cursor plugin.
-*   `U` - Update all outdated plugins.
+*   `U` - Update all outdated plugins (batched at most 5 plugins per update call).
 *   `f` - Filter the dashboard by plugin name, category (`cat:lsp`), or tag (`tag:ui`).
 
 *Each tab also renders a contextual quick-help bar at the bottom with tab-relevant action shortcuts.*

@@ -293,9 +293,164 @@ function M.update_plugin(plugin)
 	M.update_plugins({ plugin.name })
 end
 
--- Update many plugins in ONE native call. Calling native update once per plugin
--- spawns one blocking progress job apiece ("vim.pack: 100% updating (1/1)"
--- stacking N times); a single batched call shows one aggregated progress.
+-- Maximum number of plugin names handed to native vim.pack.update per call.
+-- The `U` (update all outdated), `S` (sync), and `:Pack update` flows funnel
+-- every target through update_plugins, so capping here is what keeps each
+-- native progress job small instead of one giant transfer for the whole fleet.
+M.update_batch_size = 5
+
+-- Split `items` into chunks of AT MOST `max_per_call` items each:
+-- 12 -> {5,5,2}, 7 -> {5,2}, 3 -> {3}.
+function M.split_update_batches(items, max_per_call)
+	max_per_call = math.max(1, max_per_call or M.update_batch_size)
+	local batches = {}
+	for i = 1, #items, max_per_call do
+		local batch = {}
+		for j = i, math.min(i + max_per_call - 1, #items) do
+			table.insert(batch, items[j])
+		end
+		table.insert(batches, batch)
+	end
+	return batches
+end
+
+function M.use_git_enabled()
+	local pack = require("pack")
+	return pack.config and pack.config.use_git == true
+end
+
+-- A plugin can be updated with background git only when nothing pins it to a
+-- fixed revision and its directory is a real git worktree we can fast-forward.
+local function bg_plugin_supported(p)
+	if not p or p.disabled or p.is_local or p.managed == false then
+		return false
+	end
+	if p.tag or p.commit or p.version or p.sem_version then
+		return false
+	end
+	local dir = p.dir
+	if not dir or dir == "" or vim.fn.isdirectory(dir) == 0 then
+		return false
+	end
+	return vim.uv.fs_stat(vim.fs.joinpath(dir, ".git")) ~= nil
+end
+
+-- True when an install spec can be satisfied by a background `git clone`.
+-- Branch/tag pins clone via --branch; commit hashes checkout after the clone.
+-- Semver RANGES need native's resolution logic, so they are excluded.
+function M.bg_install_supported(spec)
+	if type(spec) ~= "table" or not spec.src or not spec.name then
+		return false
+	end
+	return spec.version == nil or type(spec.version) == "string"
+end
+
+local SHA_PATTERN = "^%x%x%x%x%x%x%x[%x]*$"
+
+-- A ref name passed to `git clone --branch` must never start with "-": git
+-- would parse it as an option (argument injection), not a branch/tag.
+local function safe_ref_name(value)
+	if type(value) ~= "string" or value == "" or value:sub(1, 1) == "-" then
+		return nil
+	end
+	return value
+end
+
+-- Clone `spec` in the BACKGROUND via vim.system so the UI never blocks on a
+-- big transfer. On success the caller must still hand the spec to native
+-- vim.pack.add: the directory already exists by then, so native just adopts
+-- it, registers it, and writes the lockfile entry.
+function M.install_via_git(spec, done)
+	done = done or function() end
+	local dir = vim.fs.joinpath(state.native_opt_dir(), spec.name)
+	-- Remember whether the target existed before we started: a failed clone
+	-- leaves a HALF-cloned directory behind, which normalize() would treat as
+	-- installed on the next startup. Only ever clean up what we created.
+	local existed_before = vim.fn.isdirectory(dir) == 1
+	local version = type(spec.version) == "string" and safe_ref_name(spec.version) or nil
+	local args = { "clone" }
+	if version and not version:match(SHA_PATTERN) then
+		-- Covers both branches ("main") and tags ("v1.2.0"). Hex-like values are
+		-- treated as commits instead (see SHA_PATTERN): clone the default branch,
+		-- then check out the revision below.
+		table.insert(args, "--branch")
+		table.insert(args, version)
+	end
+	table.insert(args, spec.src)
+	table.insert(args, dir)
+
+	local log_target = state.get_plugins()[spec.name] or { name = spec.name }
+
+	-- A failed install must leave NO directory behind: a half-cloned target
+	-- would look "installed" to normalize() on the next startup and get adopted
+	-- in a broken state. Only ever clean up what we created ourselves.
+	local function fail()
+		if not existed_before and vim.fn.isdirectory(dir) == 1 then
+			pcall(vim.fn.delete, dir, "rf")
+		end
+		done(false)
+	end
+
+	begin_activity()
+	git(log_target, args, nil, function(code)
+		end_activity()
+		if code ~= 0 then
+			vim.notify(
+				("pack: background git clone failed for %s (exit %d) - see the plugin's log"):format(spec.name, code),
+				vim.log.levels.ERROR
+			)
+			return fail()
+		end
+		-- Commit pin: check out the exact revision after a default clone.
+		if version and version:match(SHA_PATTERN) then
+			begin_activity()
+			git(log_target, { "checkout", "--detach", version }, dir, function(co_code)
+				end_activity()
+				if co_code ~= 0 then
+					vim.notify(
+						("pack: background git checkout failed for %s - see the plugin's log"):format(spec.name),
+						vim.log.levels.ERROR
+					)
+					return fail()
+				end
+				done(true)
+			end)
+			return
+		end
+		done(true)
+	end)
+end
+
+-- Fast-forward ONE plugin in the background (fetch + ff-only merge), then let
+-- the caller reconcile state. Never touches pinned plugins; those fall back.
+function M.bg_update_one(p, done)
+	done = done or function() end
+	local dir = p.dir
+	begin_activity()
+	git(p, { "fetch" }, dir, function(fetch_code)
+		if fetch_code ~= 0 then
+			end_activity()
+			return done(false)
+		end
+		M.upstream_ref(p, dir, function(ref)
+			if not ref then
+				end_activity()
+				return done(false)
+			end
+			git(p, { "merge", "--ff-only", ref }, dir, function(merge_code)
+				end_activity()
+				done(merge_code == 0)
+			end)
+		end)
+	end)
+end
+
+-- Update many plugins in batches of AT MOST update_batch_size names per
+-- native call (see split_update_batches). With `use_git = true`, the actual
+-- transfer happens as backgrounded git jobs instead, and one final batched
+-- native vim.pack.update pass runs afterwards purely to reconcile the
+-- lockfile/state once HEAD has already moved -- keeping the UI responsive
+-- during large updates.
 function M.update_plugins(names)
 	if not names or #names == 0 then
 		return
@@ -304,10 +459,10 @@ function M.update_plugins(names)
 	if not (pack.native_pack and pack.native_pack.update) then
 		return
 	end
-	-- Native update runs async (its own progress notification), so flip the
-	-- targeted plugins to "updating" and repaint first: the dashboard shows the
-	-- in-flight state ("updating…" in Outdated, the Updating group in All) instead
-	-- of the user staring at a frozen list. PackChanged(update) restores status.
+	-- Updates run async, so flip the targeted plugins to "updating" and repaint
+	-- first: the dashboard shows the in-flight state ("updating…" in Outdated,
+	-- the Updating group in All) instead of the user staring at a frozen list.
+	-- PackChanged(update) restores status.
 	local plugins = state.get_plugins()
 	for _, name in ipairs(names) do
 		local p = plugins[name]
@@ -327,15 +482,15 @@ function M.update_plugins(names)
 
 	-- Restore any of `names` still stuck in "updating" back to its prior status.
 	-- Two callers:
-	--   * synchronous throw (from_timer=false): nothing is in flight, so flip ALL
+	--   * synchronous throw / immediate failure (from_timer=false): flip ALL
 	--     targets back immediately.
 	--   * fallback timer (from_timer=true): only the silent no-op case needs
 	--     rescuing. A plugin that had pending commits is a genuine, possibly slow
 	--     update; native WILL fire PackChanged(update) for it, so leave it
 	--     "updating" and let that event restore it — otherwise the timer would
 	--     prematurely drop the "updating…" indicator on a large/slow repo.
-	local function recover(from_timer)
-		for _, name in ipairs(names) do
+	local function recover(from_timer, subset)
+		for _, name in ipairs(subset or names) do
 			local p = plugins[name]
 			if p and p.status == "updating" then
 				p._update_ticks = (p._update_ticks or 0) + 1
@@ -355,30 +510,111 @@ function M.update_plugins(names)
 		ui_update()
 	end
 
-	local i = 1
-	local function update_next()
-		if i > #names then
-			-- Fallback timer for the no-event case; PackChanged(update) normally restores
-			-- status well before this fires.
-			vim.defer_fn(function()
-				recover(true)
-			end, M.update_recover_ms)
+	local function schedule_fallback_recover()
+		-- Fallback timer for the no-event case; PackChanged(update) normally
+		-- restores status well before this fires.
+		vim.defer_fn(function()
+			recover(true)
+		end, M.update_recover_ms)
+	end
+
+	if M.use_git_enabled() then
+		-- Partition once: background git handles plain tracking-branch worktrees;
+		-- everything else (pins, local, disabled, unknown) rides the final native
+		-- pass, which performs their actual transfer there.
+		local bg_names, native_names = {}, {}
+		for _, name in ipairs(names) do
+			if bg_plugin_supported(plugins[name]) then
+				table.insert(bg_names, name)
+			else
+				table.insert(native_names, name)
+			end
+		end
+
+		local function reconcile_native()
+			-- ONE aggregated native pass per <=update_batch_size batch. For
+			-- bg-updated plugins the objects are already local, so native is cheap
+			-- here (registers plugins + reconciles the lockfile); for skipped ones
+			-- it performs the real transfer. PackChanged(update) restores statuses.
+			for _, batch in ipairs(M.split_update_batches(native_names, M.update_batch_size)) do
+				pack._in_pack_op = true
+				local ok, err = pcall(pack.native_pack.update, batch, { force = true, silent = true })
+				pack._in_pack_op = false
+				if not ok then
+					vim.notify(
+						"pack: update failed for " .. table.concat(batch, ", ") .. ": " .. tostring(err),
+						vim.log.levels.ERROR
+					)
+					recover(false, batch)
+				end
+			end
+			schedule_fallback_recover()
+		end
+
+		local total = #bg_names
+		if total == 0 then
+			reconcile_native()
 			return
 		end
 
-		pack._in_pack_op = true
-		local ok, err = pcall(pack.native_pack.update, { names[i] }, { force = true, silent = true })
-		pack._in_pack_op = false
-		
-		if not ok then
-			vim.notify("pack: update failed for " .. names[i] .. ": " .. tostring(err), vim.log.levels.ERROR)
-			local p = plugins[names[i]]
-			if p and p.status == "updating" then
-				state.update_status(names[i], p.status_before_update or "installed")
-				p.status_before_update = nil
-				p._update_had_pending = nil
-				p._update_ticks = nil
+		local idx, inflight, completed = 0, 0, 0
+		local pumping = false
+		local function pump()
+			if pumping then
+				return
 			end
+			pumping = true
+			while inflight < M.max_concurrency and idx < total do
+				idx = idx + 1
+				inflight = inflight + 1
+				local name = bg_names[idx]
+
+				M.bg_update_one(plugins[name], function(ok)
+					inflight = inflight - 1
+					completed = completed + 1
+					if ok then
+						-- Background git already moved HEAD; queue a cheap native pass.
+						table.insert(native_names, name)
+					else
+						vim.notify(
+							"pack: background update failed for " .. name .. " - see the plugin's log",
+							vim.log.levels.ERROR
+						)
+						recover(false, { name })
+					end
+
+					if completed == total then
+						reconcile_native()
+					else
+						vim.schedule(pump)
+					end
+				end)
+			end
+			pumping = false
+		end
+		pump()
+		return
+	end
+
+	local batches = M.split_update_batches(names, M.update_batch_size)
+	local i = 1
+	local function update_next()
+		if i > #batches then
+			schedule_fallback_recover()
+			return
+		end
+
+		local batch = batches[i]
+		pack._in_pack_op = true
+		local ok, err = pcall(pack.native_pack.update, batch, { force = true, silent = true })
+		pack._in_pack_op = false
+
+		if not ok then
+			vim.notify(
+				"pack: update failed for " .. table.concat(batch, ", ") .. ": " .. tostring(err),
+				vim.log.levels.ERROR
+			)
+			recover(false, batch)
 		end
 
 		i = i + 1

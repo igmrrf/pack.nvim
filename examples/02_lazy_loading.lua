@@ -38,6 +38,19 @@ require("pack").setup({
         "s", -- Pressing 's' in normal mode loads the plugin, then replays 's'
         { "S", mode = { "n", "x", "o" } }
       },
+    },
+
+    -- 5. Keymaps scoped to the spec's filetypes
+    {
+      "user/python-tools.nvim",
+      lazy = true,
+      ft = "python", -- Load trigger...
+      -- ...and keymap scope: these keys are never bound globally, only
+      -- buffer-locally in python buffers (before AND after loading).
+      keys = {
+        { "<leader>pt", ":Pytest<CR>", desc = "Run pytest" },
+        { "<leader>pr", mode = "n" }, -- bare keys stay gated too
+      },
     }
   }
 })

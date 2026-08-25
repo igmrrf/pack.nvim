@@ -94,7 +94,10 @@ supported for each plugin spec:
   ft             (string|table) Filetype triggers.
   event          (string|table) Autocmd event triggers.
   pattern        (string|table) Pattern filter for event triggers.
-  keys           (string|table) Keymap lazy-load triggers.
+  keys           (string|table) Keymap lazy-load triggers. When the spec also
+                 sets `ft`, the keymaps are never bound globally: they exist
+                 only buffer-locally in buffers with a matching filetype,
+                 before the plugin loads and after.
   module         (string) Custom module name for require() tracking.
   dependencies   (table) Dependent plugin specs.
   init           (function) Callback executed before plugin load.
@@ -130,13 +133,23 @@ Options:
     `performance`    Table of performance configuration.
       `vim_loader`   Boolean. Fallback to ensure `vim.loader.enable()` is
                      called for performance caching.
+    `use_git`        Boolean (default false). When true, installs and updates
+                     run as backgrounded `git` jobs so the UI stays responsive
+                     during large transfers. Native vim.pack still runs after
+                     each operation - cheaply, with the objects already local -
+                     purely to register plugins and keep the lockfile in sync.
+                     Pinned specs (tag/commit/version range) keep using native
+                     vim.pack directly.
 
 ==============================================================================
 COMMANDS                                                         *pack-commands*
 
     :Pack             Open the pack.nvim dashboard.
-    :Pack sync        Update all plugins and build them.
-    :Pack update [name] Update specified plugin or all plugins.
+    :Pack sync        Update all plugins and build them (updates are batched
+                      at most 5 plugins per native call).
+    :Pack update [names...] Update the given plugin(s), batched at most 5
+                      per native call, or every installed plugin when
+                      omitted. Unknown names are reported and skipped.
     :Pack clean       Remove plugin directories no longer in configuration.
     :Pack restore     Roll every plugin back to the native vim.pack lockfile.
     :Pack repair      Align lockfile revisions to installed HEAD commits.

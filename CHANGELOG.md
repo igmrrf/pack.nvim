@@ -5,7 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.4] - 2026-08-25
+### Added
+
+- `use_git` config (boolean, default `false`): installs and updates run through backgrounded `git` (`vim.system`) instead of native vim.pack's blocking progress jobs, keeping the UI responsive during large transfers. Native `vim.pack.add`/`update` still runs afterwards - cheaply, with objects already local - to register plugins and reconcile the lockfile. Pinned specs (tag/commit/version ranges) keep the direct native path.
+- Bulk update flows (`U`, `S`, `:Pack sync`, `:Pack update`) now batch targets at a **maximum of 5 plugin names per native call** (12 targets -> 5+5+2), so no single progress job stalls on a huge transfer.
+- `:Pack update` accepts any number of plugin names in one call (e.g. `:Pack update foo.nvim bar.nvim`). Targets are validated first (unknown names are reported and skipped), then delegated to the same batched updater the dashboard uses - including `use_git` background transfers and a single aggregated native reconciliation pass. Tab completion now works for every target position.
+- Specs that set both `ft` and `keys`: the keymaps adhere to the filetype trigger and are never bound globally — the lazy-load placeholder and the post-load real mapping exist only buffer-locally in buffers with a matching filetype.
+
+### Fixed
+
+- A failed background clone now removes its half-written target directory instead of leaving debris that made the next startup treat the plugin as installed.
+- Version strings handed to `git clone --branch` can no longer start with `-` (argument-injection hardening); hex-like versions (7+ chars) are treated as commit SHAs rather than refs.
 
 ## [0.1.3] - 2026-08-13
 ### Changed

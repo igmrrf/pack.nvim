@@ -54,6 +54,90 @@ describe("Pack user commands and subcommands", function()
     pack.native_pack.update = orig_native
   end)
 
+  it(":Pack update batches multiple names through the shared updater", function()
+    local updated_names, call_count = nil, 0
+    local orig_native = pack.native_pack.update
+    pack.native_pack.update = function(names)
+      updated_names = names
+      call_count = call_count + 1
+    end
+
+    -- Two names -> ONE batched native call.
+    vim.cmd("Pack update foo.nvim bar.nvim")
+    assert.same({ "foo.nvim", "bar.nvim" }, updated_names)
+    assert.equals(1, call_count)
+
+    -- Three names still land as one call (below the per-call cap).
+    state.add_plugin({ "user/baz.nvim" }, pack.config)
+    updated_names, call_count = nil, 0
+    vim.cmd("Pack update foo.nvim bar.nvim baz.nvim")
+    table.sort(updated_names or {})
+    assert.same({ "bar.nvim", "baz.nvim", "foo.nvim" }, updated_names)
+    assert.equals(1, call_count)
+
+    pack.native_pack.update = orig_native
+  end)
+
+  it(":Pack update splits large name lists into <=5-per-call native batches", function()
+    local calls = {}
+    local orig_native = pack.native_pack.update
+    pack.native_pack.update = function(batch)
+      table.insert(calls, vim.deepcopy(batch))
+    end
+
+    local names = {}
+    for i = 1, 11 do
+      local name = "many" .. i .. ".nvim"
+      names[#names + 1] = name
+      state.add_plugin({ "user/" .. name }, pack.config)
+    end
+    vim.cmd("Pack update " .. table.concat(names, " "))
+
+    vim.wait(2000, function()
+      return #calls == 3
+    end)
+
+    pack.native_pack.update = orig_native
+
+    assert.equals(3, #calls, "11 names must split into three capped batches")
+    assert.equals(5, #calls[1])
+    assert.equals(5, #calls[2])
+    assert.equals(1, #calls[3])
+    local seen = {}
+    for _, batch in ipairs(calls) do
+      for _, name in ipairs(batch) do
+        seen[name] = true
+      end
+    end
+    for _, name in ipairs(names) do
+      assert.is_true(seen[name], "every requested plugin must be updated exactly where it landed")
+    end
+  end)
+
+  it(":Pack update reports unknown names but still updates the valid ones", function()
+    local updated_names = nil
+    local orig_native = pack.native_pack.update
+    pack.native_pack.update = function(names)
+      updated_names = names
+    end
+
+    local warned = nil
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.ERROR then
+        warned = msg
+      end
+    end
+
+    vim.cmd("Pack update foo.nvim ghost.nvim")
+
+    vim.notify = orig_notify
+    pack.native_pack.update = orig_native
+
+    assert.same({ "foo.nvim" }, updated_names)
+    assert.truthy(warned and warned:find("ghost.nvim"), "unknown names must be reported")
+  end)
+
   it("runs :Pack build and :Pack build <target>", function()
     local built = {}
     local orig_build = require("pack.async").run_build_hook
@@ -157,6 +241,10 @@ describe("Pack user commands and subcommands", function()
     -- Completion for plugin target
     local plugin_matches = complete_fn("fo", "Pack update fo", 14)
     assert.is_true(vim.tbl_contains(plugin_matches, "foo.nvim"))
+
+    -- Completion also works for batch targets after the first name.
+    local batch_matches = complete_fn("ba", "Pack update foo.nvim ba", 24)
+    assert.is_true(vim.tbl_contains(batch_matches, "bar.nvim"))
   end)
 
   it("supports config.ui.filter modes (default, function)", function()

@@ -56,14 +56,46 @@ function M.setup_user_command(pack_module)
 			end
 			do_sync(false)
 		elseif subcmd == "update" then
-			if target then
-				if state.get_plugins()[target] then
-					pack_module.native_call("update", pack_module.native_pack.update, { target })
-				else
-					vim.notify("pack: Plugin not found: " .. target, vim.log.levels.ERROR)
+			-- `:Pack update` takes 0 names (every installed plugin) or any number
+			-- of names. Everything delegates to the shared batched updater, so the
+			-- command behaves exactly like the dashboard's u/U/S flows -- including
+			-- `use_git` background transfers and <=update_batch_size batching.
+			local targets = {}
+			for i = 2, #args_list do
+				table.insert(targets, args_list[i])
+			end
+
+			local names, invalid = {}, {}
+			if #targets > 0 then
+				for _, t in ipairs(targets) do
+					if state.get_plugins()[t] then
+						table.insert(names, t)
+					else
+						table.insert(invalid, t)
+					end
 				end
 			else
-				pack_module.native_call("update", pack_module.native_pack.update)
+				for name, p in pairs(state.get_plugins()) do
+					-- Mirror native's "update everything" over plugins that actually
+					-- exist on disk; missing ones have nothing to update yet.
+					if
+						not p.disabled
+						and p.managed ~= false
+						and not p.is_local
+						and (p.status == "installed" or p.status == "loaded")
+					then
+						table.insert(names, name)
+					end
+				end
+			end
+
+			if #invalid > 0 then
+				vim.notify("pack: Plugin(s) not found: " .. table.concat(invalid, ", "), vim.log.levels.ERROR)
+			end
+			if #names > 0 then
+				require("pack.async").update_plugins(names)
+			elseif #targets == 0 then
+				vim.notify("pack: Nothing to update", vim.log.levels.INFO)
 			end
 		elseif subcmd == "build" then
 			if target then
@@ -176,7 +208,7 @@ function M.setup_user_command(pack_module)
 					end
 				end
 				return matches
-			elseif #args == 3 then
+			elseif #args >= 3 then
 				local subcmd = args[2]
 				if subcmd == "update" or subcmd == "build" or subcmd == "load" or subcmd == "delete" then
 					local matches = {}

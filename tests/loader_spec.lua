@@ -1,6 +1,18 @@
 local loader = require("pack.loader")
 
 describe("pack.loader triggers", function()
+  -- maparg() only sees buffer-local maps of the *current* buffer, and a string
+  -- rhs surfaces under .rhs rather than .callback. Scope + normalize here.
+  local function buf_map(lhs, bufnr, mode)
+    return vim.api.nvim_buf_call(bufnr, function()
+      local m = vim.fn.maparg(lhs, mode or "n", false, true)
+      if m and (m.callback or (m.rhs and m.rhs ~= "")) then
+        return m
+      end
+      return nil
+    end)
+  end
+
   local function make_plugin(overrides)
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
@@ -102,9 +114,178 @@ describe("pack.loader triggers", function()
     local ok, err = pcall(loader.setup_triggers, p)
     assert.is_true(ok, "a keys entry with a non-keymap field must not error: " .. tostring(err))
 
+    -- Scoping comes from the PLUGIN-level ft only; an entry-level field is
+    -- dropped (not forwarded to vim.keymap.set) and the map binds globally.
     local map = vim.fn.maparg("<F20>", "n", false, true)
     assert.equals("noop", map.desc)
     loader.remove_triggers(p)
+  end)
+
+  it("keys on a spec without ft are bound globally (no accidental scoping)", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        {
+          "user/globkey.nvim",
+          dir = dir,
+          lazy = true,
+          keys = { { "<F25>", ":EchoGlob<CR>" } },
+        },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["globkey.nvim"]
+    loader.setup_triggers(p)
+
+    assert.is_not_nil(buf_map("<F25>", vim.api.nvim_get_current_buf()), "no ft means the placeholder stays global")
+    loader.remove_triggers(p)
+    assert.is_nil(buf_map("<F25>", vim.api.nvim_get_current_buf()))
+  end)
+
+  it("with a plugin-level ft, keys exist only in matching buffers before loading", function()
+    local p = make_plugin({
+      name = "ftgate.nvim",
+      ft = { "python", "rust" },
+      status = nil,
+      keys = {
+        { "<F21>", ":NoopFt<CR>", desc = "gated" },
+        { "<F22>", mode = "x" }, -- bare key also gated
+      },
+    })
+    loader.setup_triggers(p)
+
+    -- No global placeholders at all (checked from a non-matching buffer).
+    local plain_buf = vim.api.nvim_get_current_buf()
+    for _, lhs in ipairs({ "<F21>", "<F22>" }) do
+      assert.is_nil(buf_map(lhs, plain_buf), lhs .. " must not be bound in normal mode")
+      assert.is_nil(buf_map(lhs, plain_buf, "x"), lhs .. " must not be bound in visual mode")
+    end
+
+    -- A matching buffer gets buffer-local placeholders.
+    local py_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(py_buf)
+    vim.bo[py_buf].filetype = "python"
+    local m = buf_map("<F21>", py_buf)
+    assert.is_not_nil(m, "matching ft must get the placeholder")
+    assert.equals("gated", m.desc)
+    assert.truthy(m.buffer, "placeholder must be buffer-local")
+    assert.is_not_nil(buf_map("<F22>", py_buf, "x"), "bare key must be gated too")
+
+    -- An unrelated filetype never sees either key.
+    local lua_buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(lua_buf)
+    vim.bo[lua_buf].filetype = "lua"
+    assert.is_nil(buf_map("<F21>", lua_buf))
+    assert.is_nil(buf_map("<F22>", lua_buf, "x"))
+
+    loader.remove_triggers(p)
+    assert.is_nil(buf_map("<F21>", py_buf), "remove_triggers must drop the gated maps")
+  end)
+
+  it("pressing an ft-gated lazy key loads the plugin and the real mapping stays ft-scoped", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        {
+          "user/ftkey.nvim",
+          dir = dir,
+          lazy = true,
+          ft = "python",
+          keys = { { "<F27>", function() _G.FTKEY_FIRED = true end } },
+        },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["ftkey.nvim"]
+    loader.setup_triggers(p)
+
+    -- Non-matching filetype never sees the key, before OR after loading.
+    local lua_buf = vim.api.nvim_create_buf(true, false)
+    vim.bo[lua_buf].filetype = "lua"
+    vim.api.nvim_set_current_buf(lua_buf)
+    assert.is_nil(buf_map("<F27>", lua_buf), "non-matching ft must have no placeholder")
+
+    -- Matching buffer gets the buffer-local placeholder via FileType/seeding.
+    local py_buf = vim.api.nvim_create_buf(true, false)
+    vim.bo[py_buf].filetype = "python"
+    vim.api.nvim_set_current_buf(py_buf)
+    local placeholder = buf_map("<F27>", py_buf)
+    assert.is_not_nil(placeholder, "matching ft must get the lazy-load placeholder")
+    assert.is_not_nil(placeholder.callback)
+
+    placeholder.callback()
+    assert.equals("loaded", p.status, "pressing the key in a matching buffer must load the plugin")
+    _G.FTKEY_FIRED = nil
+
+    -- Real mapping is now buffer-local to python buffers only.
+    local real_map = buf_map("<F27>", py_buf)
+    assert.is_not_nil(real_map.callback, "real mapping must be rebound in the python buffer")
+    real_map.callback()
+    assert.is_true(_G.FTKEY_FIRED)
+    _G.FTKEY_FIRED = nil
+
+    assert.is_nil(buf_map("<F27>", lua_buf), "lua buffer must still not see the mapping")
+
+    -- Future python buffers receive the real mapping through the FileType watcher.
+    local py2 = vim.api.nvim_create_buf(true, false)
+    vim.bo[py2].filetype = "python"
+    assert.is_not_nil(buf_map("<F27>", py2).callback, "future matching buffers must inherit the real mapping")
+
+    loader.remove_triggers(p)
+    assert.is_nil(buf_map("<F27>", py_buf), "remove_triggers must drop buffer-local real mappings")
+  end)
+
+  it("an ft-gated key on a plugin loaded via another trigger binds only in matching buffers", function()
+    local state = require("pack.state")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    local config = {
+      plugins = {
+        {
+          "user/ftevent.nvim",
+          dir = dir,
+          lazy = true,
+          event = "VimResized",
+          ft = { "go", "rust" },
+          keys = { { "<F26>", ":EchoHi<CR>" } },
+        },
+      },
+    }
+    state.init(config)
+    local p = state.get_plugins()["ftevent.nvim"]
+    loader.setup_triggers(p)
+
+    -- Plugin loads without its key ever being pressed.
+    loader.load("ftevent.nvim")
+    assert.equals("loaded", p.status)
+
+    local go_buf = vim.api.nvim_create_buf(true, false)
+    vim.bo[go_buf].filetype = "go"
+    local go_map = buf_map("<F26>", go_buf)
+    assert.is_not_nil(go_map, "first ft in list must get the real mapping post-load")
+    assert.truthy(go_map.buffer, "real mapping must be buffer-local")
+
+    local rust_buf = vim.api.nvim_create_buf(true, false)
+    vim.bo[rust_buf].filetype = "rust"
+    assert.is_not_nil(buf_map("<F26>", rust_buf), "second ft in list must also match")
+
+    local lua_buf = vim.api.nvim_create_buf(true, false)
+    vim.bo[lua_buf].filetype = "lua"
+    assert.is_nil(buf_map("<F26>", lua_buf), "unlisted ft must stay unmapped")
+
+    -- Pre-existing matching buffers get seeded immediately at rebind time too.
+    local go2 = vim.api.nvim_create_buf(true, false)
+    vim.bo[go2].filetype = "go"
+    local go2_map = buf_map("<F26>", go2)
+    assert.is_not_nil(go2_map, "existing go buffer must be seeded via FileType watcher")
+    assert.equals(":EchoHi<CR>", go2_map.rhs)
+
+    loader.remove_triggers(p)
+    assert.is_nil(buf_map("<F26>", go_buf), "remove_triggers must drop ft-scoped real mappings")
   end)
 
   it("restores a lazy plugin's real key mapping after it loads via a non-key trigger (event/cmd/dependency)", function()

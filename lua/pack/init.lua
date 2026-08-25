@@ -10,6 +10,12 @@ M.config = {
 	performance = {
 		vim_loader = true,
 	},
+	-- Run installs/updates through backgrounded `git` (vim.system) instead of
+	-- native vim.pack's progress jobs, which can make the UI unresponsive on
+	-- large transfers. Native vim.pack still runs afterwards - cheaply, with the
+	-- objects already local - purely to register plugins and keep the lockfile
+	-- in sync.
+	use_git = false,
 	plugins = {},
 	ui = {
 		border = "rounded",
@@ -166,6 +172,9 @@ function M._install_and_load(native_specs, confirm)
 					end)
 				end
 
+				local use_git = M.config and M.config.use_git == true
+				local async = use_git and require("pack.async") or nil
+
 				local i = 1
 				local function process_next()
 					if i > #missing_specs then
@@ -178,25 +187,58 @@ function M._install_and_load(native_specs, confirm)
 						return
 					end
 
-					M._in_pack_op = true
-					local ok, err =
-						pcall(M.native_pack.add, { missing_specs[i] }, { load = loader.load_fn, confirm = confirm, silent = true })
-					M._in_pack_op = false
-					if not ok then
-						vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+					-- Advance to the next spec after this one settles. Headless runs
+					-- (no UI) continue synchronously; interactive ones pace with
+					-- defer_fn so the loop never hogs the main loop.
+					local function advance()
+						i = i + 1
+						if #vim.api.nvim_list_uis() == 0 then
+							process_next()
+						else
+							vim.defer_fn(process_next, 10)
+						end
 					end
 
-					if package.loaded["pack.ui"] then
-						pcall(function()
-							require("pack.ui").update()
+					local spec = missing_specs[i]
+					if async and async.bg_install_supported(spec) then
+						-- Non-blocking: clone in the background, then let native adopt
+						-- the finished directory (registers it + writes the lockfile).
+						async.install_via_git(spec, function(cloned)
+							if cloned then
+								M._in_pack_op = true
+								local ok_add, err_add =
+									pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
+								M._in_pack_op = false
+								if not ok_add then
+									vim.notify("pack: native vim.pack.add failed: " .. tostring(err_add), vim.log.levels.WARN)
+								end
+							else
+								state.update_status(spec.name, "error")
+							end
+
+							if package.loaded["pack.ui"] then
+								pcall(function()
+									require("pack.ui").update()
+								end)
+							end
+							advance()
 						end)
-					end
-
-					i = i + 1
-					if #vim.api.nvim_list_uis() == 0 then
-						process_next()
 					else
-						vim.defer_fn(process_next, 10)
+						M._in_pack_op = true
+						local ok, err =
+							pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
+						M._in_pack_op = false
+						if not ok then
+							vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+						end
+
+						if package.loaded["pack.ui"] then
+							pcall(function()
+								require("pack.ui").update()
+							end)
+						end
+
+						advance()
 					end
 				end
 				process_next()
