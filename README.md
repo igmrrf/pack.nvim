@@ -57,6 +57,7 @@ require("pack").setup({
       not_loaded = "○",
       error = "✖",
       sync = "↺",
+      queued = "◌",
     },
   },
   plugins = {

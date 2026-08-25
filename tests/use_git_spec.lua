@@ -117,6 +117,53 @@ describe("pack.async update batching", function()
     pack.native_pack.update = orig_update
     await_settled(names)
   end)
+
+  it("skips a plugin that is already mid-install/mid-update instead of clobbering its status", function()
+    helpers.reset()
+    state.init({ plugins = { { "user/busyplug.nvim" } } })
+    local p = state.get_plugins()["busyplug.nvim"]
+    p.status = "installing"
+
+    local update_called = false
+    local orig_update = pack.native_pack.update
+    pack.native_pack.update = function()
+      update_called = true
+    end
+
+    async.update_plugins({ "busyplug.nvim" })
+
+    pack.native_pack.update = orig_update
+
+    assert.equals("installing", p.status, "a plugin already mid-install must not be re-targeted")
+    assert.is_false(update_called, "native update must never be invoked for a busy plugin")
+  end)
+
+  it("still updates the other requested plugins when one of them is busy", function()
+    helpers.reset()
+    async.update_recover_ms = 50
+    local names = register_installed(2, "mixedbusy")
+    for _, name in ipairs(names) do
+      state.set_behind(name, 1)
+    end
+    state.get_plugins()[names[1]].status = "updating"
+
+    local calls = {}
+    local orig_update = pack.native_pack.update
+    pack.native_pack.update = function(batch, _opts)
+      table.insert(calls, vim.deepcopy(batch))
+    end
+
+    async.update_plugins(names)
+    vim.wait(2000, function()
+      return #calls == 1
+    end)
+
+    pack.native_pack.update = orig_update
+
+    assert.equals(1, #calls)
+    assert.same({ names[2] }, calls[1], "only the non-busy plugin is targeted")
+    await_settled({ names[2] })
+  end)
 end)
 
 describe("pack.async use_git background operations", function()
@@ -440,5 +487,116 @@ describe("pack.async use_git background operations", function()
     )
     -- ...and it loads directly using the bypass.
     assert.is_true(loaded)
+  end)
+
+  it("keeps unstarted installs \"queued\" and only lets max_concurrency start as \"installing\"", function()
+    local names, specs = {}, {}
+    for i = 1, 10 do
+      local name = "queuetest" .. i .. ".nvim"
+      table.insert(names, name)
+      table.insert(specs, { "user/" .. name })
+    end
+    state.init({ plugins = specs })
+
+    local orig_max_concurrency = async.max_concurrency
+    async.max_concurrency = 3
+    vim.system = fake_system({}, 0)
+
+    local native_specs = {}
+    for _, name in ipairs(names) do
+      table.insert(native_specs, state.to_native_spec(state.get_plugins()[name]))
+    end
+
+    pack._install_and_load(native_specs, false)
+
+    -- Dispatch to the queue is synchronous: by the time _install_and_load
+    -- returns, exactly max_concurrency workers have picked up a spec (and
+    -- flipped it to "installing"); everyone else is still waiting its turn.
+    local installing, queued = 0, 0
+    for _, name in ipairs(names) do
+      local status = state.get_plugins()[name].status
+      if status == "installing" then
+        installing = installing + 1
+      elseif status == "queued" then
+        queued = queued + 1
+      end
+    end
+    assert.equals(3, installing, "only max_concurrency workers may be active at once")
+    assert.equals(7, queued, "everything else waits as \"queued\", not \"installing\"")
+
+    async.max_concurrency = orig_max_concurrency
+    vim.wait(3000, function()
+      for _, name in ipairs(names) do
+        local status = state.get_plugins()[name].status
+        if status == "queued" or status == "installing" then
+          return false
+        end
+      end
+      return true
+    end)
+  end)
+
+  it("does not lose lockfile entries when many background clones finish concurrently", function()
+    -- Real (unmocked) git repos: update_entry()'s head_rev() runs an actual
+    -- blocking `git rev-parse HEAD` subprocess per completion, the same
+    -- subprocess call whose event-loop reentrancy caused concurrent installs
+    -- to clobber each other's lockfile entry before the write was serialized.
+    local function make_upstream(i)
+      local dir = vim.fn.tempname() .. "-race-upstream" .. i
+      vim.fn.mkdir(dir, "p")
+      vim.fn.system({ "git", "-C", dir, "init", "-q" })
+      vim.fn.system({ "git", "-C", dir, "config", "user.email", "t@t" })
+      vim.fn.system({ "git", "-C", dir, "config", "user.name", "t" })
+      vim.fn.writefile({ "x" }, dir .. "/f")
+      vim.fn.system({ "git", "-C", dir, "add", "-A" })
+      vim.fn.system({ "git", "-C", dir, "commit", "-qm", "init" })
+      return dir
+    end
+
+    local lockfile = require("pack.lockfile")
+    local lock_path = vim.fn.tempname() .. "-nvim-pack-lock.json"
+    local orig_path = lockfile.path
+    lockfile.path = function()
+      return lock_path
+    end
+
+    local N = 6
+    local names, specs = {}, {}
+    for i = 1, N do
+      local name = "race" .. i .. ".nvim"
+      table.insert(names, name)
+      table.insert(specs, { make_upstream(i), name = name })
+    end
+    state.init({ plugins = specs })
+
+    local native_specs = {}
+    for _, name in ipairs(names) do
+      table.insert(native_specs, state.to_native_spec(state.get_plugins()[name]))
+    end
+
+    pack._install_and_load(native_specs, false)
+
+    local ok = vim.wait(10000, function()
+      for _, name in ipairs(names) do
+        local status = state.get_plugins()[name].status
+        if status == "queued" or status == "installing" then
+          return false
+        end
+      end
+      return true
+    end, 20)
+
+    local lock = lockfile.read()
+    lockfile.path = orig_path
+    if vim.fn.filereadable(lock_path) == 1 then
+      vim.fn.delete(lock_path)
+    end
+
+    assert.is_true(ok, "all background clones should have settled")
+    assert.is_not_nil(lock, "the lockfile must exist after the concurrent installs")
+    for _, name in ipairs(names) do
+      assert.is_not_nil(lock.plugins[name], name .. " must have a recorded lockfile entry")
+      assert.is_true(lock.plugins[name].rev and lock.plugins[name].rev ~= "", name .. " must have a recorded rev")
+    end
   end)
 end)

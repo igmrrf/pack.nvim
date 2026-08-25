@@ -225,6 +225,152 @@ describe("pack.init _install_and_load chunking and pcall guard", function()
     assert.is_true(ok)
     assert.equals("installing", state.get_plugins()["instplug"].status)
   end)
+
+  it("retries without a version constraint when native reports no tagged releases", function()
+    local pack = require("pack")
+    -- lazy=true: load_fn still runs (recording status/dir), but flush_pending
+    -- only wires up triggers for it instead of eager-packadd-ing a path that
+    -- doesn't really exist on disk -- keeping this test about the version
+    -- fallback, not about a real plugin load succeeding.
+    state.init({ plugins = { { "u/releaseless", version = "*", lazy = true } } })
+    local p = state.get_plugins()["releaseless"]
+
+    local add_calls = {}
+    local orig_native = pack.native_pack
+    pack.native_pack = {
+      add = function(specs, opts)
+        table.insert(add_calls, vim.deepcopy(specs))
+        if specs[1].version ~= nil then
+          error(
+            "vim.pack:\n\n`releaseless`:\n"
+              .. ".../pack.lua:652: No versions fit constraint. Relax it or switch to branch. Available:\n"
+              .. "Versions: \nBranches: main"
+          )
+        end
+        if opts and opts.load then
+          opts.load({ spec = specs[1], path = "/tmp/releaseless" })
+        end
+      end,
+    }
+
+    local warned = {}
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.WARN then
+        table.insert(warned, tostring(msg))
+      end
+    end
+
+    local ns = state.to_native_spec(p)
+    local ok = pcall(pack._install_and_load, { ns }, false)
+
+    vim.notify = orig_notify
+    pack.native_pack = orig_native
+
+    assert.is_true(ok)
+    assert.equals(2, #add_calls, "first call carries the version constraint, the retry drops it")
+    assert.is_not_nil(add_calls[1][1].version, "the first attempt still tries the requested version")
+    assert.is_nil(add_calls[2][1].version, "the retry must drop the version constraint")
+    assert.is_true(#warned > 0, "the fallback must be reported")
+    assert.equals("installed", state.get_plugins()["releaseless"].status, "the retry must still install the plugin")
+  end)
+
+  it("does not retry (and reports normally) for an unrelated native_pack.add error", function()
+    local pack = require("pack")
+    state.init({ plugins = { { "u/unrelatederr", version = "*" } } })
+    local p = state.get_plugins()["unrelatederr"]
+
+    local add_calls = 0
+    local orig_native = pack.native_pack
+    pack.native_pack = {
+      add = function(specs)
+        add_calls = add_calls + 1
+        error("some unrelated network failure")
+      end,
+    }
+
+    local warned = {}
+    local orig_notify = vim.notify
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.WARN then
+        table.insert(warned, tostring(msg))
+      end
+    end
+
+    local ns = state.to_native_spec(p)
+    local ok = pcall(pack._install_and_load, { ns }, false)
+
+    vim.notify = orig_notify
+    pack.native_pack = orig_native
+
+    assert.is_true(ok)
+    assert.equals(1, add_calls, "an unrelated error must not trigger the version-fallback retry")
+    assert.is_true(#warned > 0, "the original failure must still be reported")
+    assert.equals("error", state.get_plugins()["unrelatederr"].status)
+  end)
+
+  it("only strips the version constraint of the actual offending spec in a multi-spec batch", function()
+    local pack = require("pack")
+    -- Both plugins are already "installed" (dir present) so they route through
+    -- the multi-spec installed_specs bulk-add path, not the single-spec
+    -- missing-plugin path -- that's the path where the whole batch fails
+    -- because of ONE spec, and only that spec's pin may be dropped.
+    state.init({
+      plugins = {
+        { "u/goodpin", version = "*" },
+        { "u/badpin", version = "*" },
+      },
+    })
+    local good = state.get_plugins()["goodpin"]
+    local bad = state.get_plugins()["badpin"]
+    good.dir = vim.fn.tempname()
+    bad.dir = vim.fn.tempname()
+    vim.fn.mkdir(good.dir, "p")
+    vim.fn.mkdir(bad.dir, "p")
+
+    local NO_VERSIONS_ERR = "vim.pack:\n\n`badpin`:\n"
+      .. ".../pack.lua:652: No versions fit constraint. Relax it or switch to branch. Available:\n"
+      .. "Versions: \nBranches: main"
+
+    local add_calls = {}
+    local orig_native = pack.native_pack
+    pack.native_pack = {
+      add = function(specs)
+        table.insert(add_calls, vim.deepcopy(specs))
+        for _, s in ipairs(specs) do
+          if s.name == "badpin" and s.version ~= nil then
+            error(NO_VERSIONS_ERR)
+          end
+        end
+      end,
+    }
+
+    local ns_good = state.to_native_spec(good)
+    local ns_bad = state.to_native_spec(bad)
+    local ok = pcall(pack._install_and_load, { ns_good, ns_bad }, false)
+
+    pack.native_pack = orig_native
+    assert.is_true(ok)
+
+    assert.is_true(#add_calls >= 2, "the failing batch must be retried per-spec")
+    assert.equals(2, #add_calls[1], "the first attempt is still the whole batch")
+
+    -- table.insert would silently drop a nil entry, so track presence/absence
+    -- of a version directly instead of collecting the (possibly-nil) values.
+    local good_saw_nil_version, bad_had_nil_version = false, false
+    for i = 2, #add_calls do
+      for _, s in ipairs(add_calls[i]) do
+        if s.name == "goodpin" and s.version == nil then
+          good_saw_nil_version = true
+        elseif s.name == "badpin" and s.version == nil then
+          bad_had_nil_version = true
+        end
+      end
+    end
+
+    assert.is_false(good_saw_nil_version, "goodpin's valid version pin must never be dropped just because badpin failed")
+    assert.is_true(bad_had_nil_version, "badpin must eventually be retried with its version constraint dropped")
+  end)
 end)
 
 describe("pack.setup version gate (<0.12, no native vim.pack)", function()

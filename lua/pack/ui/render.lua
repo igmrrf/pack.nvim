@@ -182,14 +182,26 @@ function M.render_all_tab(
 	show_select_ui
 )
 	local plugins = state.get_plugins()
-	local groups =
-		{ loaded = {}, installed = {}, missing = {}, installing = {}, updating = {}, building = {}, error = {} }
+	local groups = {
+		loaded = {},
+		installed = {},
+		missing = {},
+		queued = {},
+		installing = {},
+		updating = {},
+		building = {},
+		error = {},
+	}
 
 	for _, p in pairs(plugins) do
 		if not p.disabled then
 			if M.matches_search(p, search_term) then
-				if groups[p.status] then
-					table.insert(groups[p.status], p)
+				-- "queued" (install) and "queued_update" share one dashboard group;
+				-- they're only kept apart so the Updates tab/count can ignore
+				-- newly-queued installs.
+				local group_key = (p.status == "queued_update") and "queued" or p.status
+				if groups[group_key] then
+					table.insert(groups[group_key], p)
 				else
 					table.insert(groups.installed, p)
 				end
@@ -323,6 +335,7 @@ function M.render_all_tab(
 	end
 
 	render_group("Not Installed", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticWarn")
+	render_group("Queued", groups.queued, config_ref.ui.icons.queued, "Comment")
 	render_group("Installing", groups.installing, config_ref.ui.icons.sync, "DiagnosticWarn")
 	render_group("Updating", groups.updating, config_ref.ui.icons.sync, "DiagnosticWarn")
 	render_group("Building", groups.building, config_ref.ui.icons.sync, "DiagnosticWarn")

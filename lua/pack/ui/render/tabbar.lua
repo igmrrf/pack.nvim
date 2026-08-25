@@ -32,7 +32,7 @@ function M.get_tab_counts()
 			counts.disabled = counts.disabled + 1
 		else
 			counts.all = counts.all + 1
-			if (p.behind and p.behind > 0) or p.status == "updating" or p.status == "building" then
+			if (p.behind and p.behind > 0) or p.status == "queued_update" or p.status == "updating" or p.status == "building" then
 				counts.outdated = counts.outdated + 1
 			end
 		end

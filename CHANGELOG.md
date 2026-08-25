@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-08-25
+### Added
+
+- Dashboard "Queued" status/group: plugins targeted for install or update now show as queued until a worker slot actually starts their transfer, instead of the whole batch appearing "installing"/"updating" at once behind the concurrency limit.
+- Background installs (`use_git = true`) now run through the same bounded concurrent pump as background updates, significantly speeding up bulk clones of many missing plugins at once.
+
+### Fixed
+
+- A plugin pinned with a lazy.nvim-style `version` range (e.g. `version = "*"`) whose repo has no tagged releases no longer fails installation with "No versions fit constraint"; pack.nvim retries without the version constraint and tracks the default branch instead, isolating the retry to only the offending plugin in a batch.
+- Background installs no longer call native `vim.pack.add` after a successful clone (it would look up a lockfile entry it doesn't have cached yet and try to re-clone); the plugin now loads directly for the session and native adopts it from the lockfile on the next startup.
+- Concurrent background clones could clobber each other's lockfile entry when a blocking `git rev-parse HEAD` call interleaved with another clone's write; lockfile writes are now serialized.
+- `:Pack update`/`U`/`S` no longer re-targets a plugin that is already mid-install or mid-update, which previously could clobber its in-flight status.
+- A failed load after a successful background clone is now reported and marks the plugin as errored instead of leaving it silently stuck at "installing".
+
 ## [0.1.4] - 2026-08-25
 ### Added
 

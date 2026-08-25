@@ -356,6 +356,36 @@ local function safe_ref_name(value)
 	return value
 end
 
+-- Concurrent background clones (bounded pump, up to max_concurrency at once)
+-- can each finish close together and want to write the lockfile. update_entry()
+-- does a blocking read -> `git rev-parse` -> write, and Neovim's synchronous git
+-- subprocess call can pump the event loop while it waits -- letting a second
+-- clone's completion run its own update_entry() nested inside the first one's
+-- wait, read the same not-yet-written file, and clobber it on write. Serialize
+-- every write through this queue so only one update_entry() call is ever
+-- actually in flight; a write requested while one is running just waits its turn.
+local lockfile_write_queue = {}
+local lockfile_writing = false
+
+local function process_lockfile_writes()
+	if lockfile_writing then
+		return
+	end
+	local job = table.remove(lockfile_write_queue, 1)
+	if not job then
+		return
+	end
+	lockfile_writing = true
+	pcall(require("pack.lockfile").update_entry, job.name, job.src, job.dir)
+	lockfile_writing = false
+	process_lockfile_writes()
+end
+
+local function queue_lockfile_write(name, src, dir)
+	table.insert(lockfile_write_queue, { name = name, src = src, dir = dir })
+	process_lockfile_writes()
+end
+
 -- Clone `spec` in the BACKGROUND via vim.system so the UI never blocks on a
 -- big transfer. On success the caller must still hand the spec to native
 -- vim.pack.add: the directory already exists by then, so native just adopts
@@ -403,9 +433,7 @@ function M.install_via_git(spec, done)
 		end
 
 		local function success()
-			pcall(function()
-				require("pack.lockfile").update_entry(spec.name, spec.src, dir)
-			end)
+			queue_lockfile_write(spec.name, spec.src, dir)
 			done(true)
 		end
 
@@ -459,6 +487,14 @@ end
 -- native vim.pack.update pass runs afterwards purely to reconcile the
 -- lockfile/state once HEAD has already moved -- keeping the UI responsive
 -- during large updates.
+local BUSY_STATUSES = {
+	queued = true,
+	queued_update = true,
+	installing = true,
+	updating = true,
+	building = true,
+}
+
 function M.update_plugins(names)
 	if not names or #names == 0 then
 		return
@@ -467,10 +503,36 @@ function M.update_plugins(names)
 	if not (pack.native_pack and pack.native_pack.update) then
 		return
 	end
-	-- Updates run async, so flip the targeted plugins to "updating" and repaint
-	-- first: the dashboard shows the in-flight state ("updating…" in Outdated,
-	-- the Updating group in All) instead of the user staring at a frozen list.
-	-- PackChanged(update) restores status.
+
+	-- Drop anything already mid-install/mid-update: it has no stable "current
+	-- status" to capture into status_before_update, and targeting it here would
+	-- stomp whatever operation already has it in flight -- e.g. a plugin still
+	-- being cloned by the install pump would get clobbered to "queued_update",
+	-- and a later failure here could restore that stale captured status onto a
+	-- plugin the install already finished.
+	do
+		local plugins_snapshot = state.get_plugins()
+		local filtered = {}
+		for _, name in ipairs(names) do
+			local p = plugins_snapshot[name]
+			if p and not BUSY_STATUSES[p.status] then
+				table.insert(filtered, name)
+			end
+		end
+		names = filtered
+	end
+	if #names == 0 then
+		return
+	end
+
+	-- Updates run async, so flip the targeted plugins to "queued_update" and
+	-- repaint first: the dashboard shows the pending work (folded into the
+	-- Queued group in All; counted in Updates) instead of the user staring at
+	-- a frozen list. "queued_update" (not the install path's plain "queued")
+	-- so the Updates tab/count -- which cares about outdated plugins, not
+	-- newly-queued installs -- can tell the two apart. Each plugin flips on to
+	-- "updating" only once a worker slot actually starts its transfer (see
+	-- mark_updating below); PackChanged(update) restores status afterwards.
 	local plugins = state.get_plugins()
 	for _, name in ipairs(names) do
 		local p = plugins[name]
@@ -480,12 +542,24 @@ function M.update_plugins(names)
 			-- likely no-op (already at latest). Native fires PackChanged for real
 			-- updates but stays silent for no-ops, so the two need different recovery.
 			p._update_had_pending = (p.behind or 0) > 0
-			state.update_status(name, "updating")
+			state.update_status(name, "queued_update")
 		end
 	end
 	ui_update()
 	if package.loaded["pack.ui"] then
 		require("pack.ui").ensure_spinner()
+	end
+
+	-- Flip a batch/single name from "queued_update" to "updating" right as a
+	-- worker slot picks it up. Skips names already "updating" (a bg-updated
+	-- plugin riding the final native reconciliation pass is still the same update).
+	local function mark_updating(subset)
+		for _, name in ipairs(subset) do
+			local p = plugins[name]
+			if p and p.status == "queued_update" then
+				state.update_status(name, "updating")
+			end
+		end
 	end
 
 	-- Restore any of `names` still stuck in "updating" back to its prior status.
@@ -545,6 +619,7 @@ function M.update_plugins(names)
 			-- here (registers plugins + reconciles the lockfile); for skipped ones
 			-- it performs the real transfer. PackChanged(update) restores statuses.
 			for _, batch in ipairs(M.split_update_batches(native_names, M.update_batch_size)) do
+				mark_updating(batch)
 				pack._in_pack_op = true
 				local ok, err = pcall(pack.native_pack.update, batch, { force = true, silent = true })
 				pack._in_pack_op = false
@@ -576,6 +651,7 @@ function M.update_plugins(names)
 				idx = idx + 1
 				inflight = inflight + 1
 				local name = bg_names[idx]
+				mark_updating({ name })
 
 				M.bg_update_one(plugins[name], function(ok)
 					inflight = inflight - 1
@@ -613,6 +689,7 @@ function M.update_plugins(names)
 		end
 
 		local batch = batches[i]
+		mark_updating(batch)
 		pack._in_pack_op = true
 		local ok, err = pcall(pack.native_pack.update, batch, { force = true, silent = true })
 		pack._in_pack_op = false

@@ -27,6 +27,7 @@ M.config = {
 			not_loaded = "○",
 			error = "✖",
 			sync = "↺",
+			queued = "◌",
 		},
 	},
 }
@@ -132,6 +133,62 @@ local function chunk_array(arr, chunk_size)
 	return delegate.chunk_array(arr, chunk_size)
 end
 
+local function is_no_version_error(err)
+	return type(err) == "string" and err:find("No versions fit constraint", 1, true) ~= nil
+end
+
+-- lazy.nvim treats `version = "*"` (or any range) as "prefer a tagged release
+-- if the repo has one" and silently tracks the default branch when it
+-- doesn't. Native vim.pack has no such fallback: a version constraint means
+-- "resolve to a tag", full stop, and it hard-errors when the repo has no
+-- tags at all ("No versions fit constraint"). Retry with the constraint
+-- dropped so a release-less repo (a plugin that only ships a `main` branch,
+-- say) still installs instead of failing on every startup.
+--
+-- native's error never names which spec failed, so a multi-spec batch can't
+-- just strip every versioned spec's constraint -- that would silently drop
+-- perfectly valid pins on this failing spec's co-batched siblings. Instead,
+-- fall back to one native call PER spec so each one either succeeds as-is or
+-- gets its own isolated version-stripped retry; a redundant add() for a spec
+-- that already succeeded earlier in the original batch is a harmless no-op
+-- (native.add is idempotent -- the same guarantee every startup's bulk
+-- re-add of already-installed specs already relies on).
+local function add_with_version_fallback(specs, opts)
+	local ok, err = pcall(M.native_pack.add, specs, opts)
+	if ok or not is_no_version_error(err) then
+		return ok, err
+	end
+
+	if #specs > 1 then
+		local final_ok, final_err = true, nil
+		for _, spec in ipairs(specs) do
+			local spec_ok, spec_err = add_with_version_fallback({ spec }, opts)
+			if not spec_ok then
+				final_ok, final_err = spec_ok, spec_err
+			end
+		end
+		return final_ok, final_err
+	end
+
+	local spec = specs[1]
+	if not spec or spec.version == nil then
+		return ok, err
+	end
+	local stripped = vim.tbl_extend("force", {}, spec)
+	stripped.version = nil
+	local retry_ok, retry_err = pcall(M.native_pack.add, { stripped }, opts)
+	if retry_ok then
+		vim.notify(
+			("pack: '%s' has no tagged releases matching its version constraint; tracking its default branch instead"):format(
+				spec.name
+			),
+			vim.log.levels.WARN
+		)
+		return true, nil
+	end
+	return retry_ok, retry_err
+end
+
 -- Hand a batch of native specs to native vim.pack (which clones/checks out and
 -- calls loader.load_fn per plugin instead of sourcing), then run our ordered
 -- loader. Native never touches runtimepath - we own all loading.
@@ -143,7 +200,9 @@ function M._install_and_load(native_specs, confirm)
 		for _, spec in ipairs(native_specs) do
 			local p = state.find_plugin(spec.name, spec.src)
 			if p and (not p.dir or p.dir == "" or vim.fn.isdirectory(p.dir) == 0) then
-				state.update_status(p.name, "installing")
+				-- "queued" until a worker slot actually picks it up (see pump below);
+				-- distinguishes "waiting its turn" from "actively cloning/adding".
+				state.update_status(p.name, "queued")
 				table.insert(missing_specs, spec)
 			else
 				table.insert(installed_specs, spec)
@@ -155,7 +214,7 @@ function M._install_and_load(native_specs, confirm)
 			for _, chunk in ipairs(chunks) do
 				M._in_pack_op = true
 				local ok, err =
-					pcall(M.native_pack.add, chunk, { load = loader.load_fn, confirm = confirm, silent = true })
+					add_with_version_fallback(chunk, { load = loader.load_fn, confirm = confirm, silent = true })
 				M._in_pack_op = false
 				if not ok then
 					vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
@@ -174,12 +233,10 @@ function M._install_and_load(native_specs, confirm)
 
 				local use_git = M.config and M.config.use_git == true
 				local async = use_git and require("pack.async") or nil
+				local queue_mod = require("pack.async.queue")
 
 				local total = #missing_specs
-				local idx = 0
-				local inflight = 0
 				local completed = 0
-				local pumping = false
 				local max_workers = async and async.max_concurrency or 1
 
 				local function finish_all()
@@ -191,72 +248,91 @@ function M._install_and_load(native_specs, confirm)
 					end
 				end
 
-				local function pump()
-					if pumping then
-						return
-					end
-					pumping = true
-					while inflight < max_workers and idx < total do
-						idx = idx + 1
-						inflight = inflight + 1
-						local spec = missing_specs[idx]
+				local worker = function(spec, done)
+					-- A worker slot just picked this spec up: it stops waiting ("queued")
+					-- and starts actually cloning/adding ("installing").
+					state.update_status(spec.name, "installing")
 
-						local function advance()
-							inflight = inflight - 1
-							completed = completed + 1
-							if package.loaded["pack.ui"] then
-								pcall(function()
-									require("pack.ui").update()
-								end)
-							end
-							if completed == total then
-								finish_all()
-							else
-								vim.schedule(pump)
-							end
+					local function advance()
+						completed = completed + 1
+						if package.loaded["pack.ui"] then
+							pcall(function()
+								require("pack.ui").update()
+							end)
 						end
+						if completed == total then
+							finish_all()
+						end
+						done()
+					end
 
-						if async and async.bg_install_supported(spec) then
-							-- Non-blocking: clone in the background, then let native adopt
-							-- the finished directory (registers it + writes the lockfile).
-							async.install_via_git(spec, function(cloned)
-								if cloned then
-									-- The lockfile was written on disk by install_via_git, but native
-									-- vim.pack caches it in memory. If we call native_pack.add here,
-									-- it won't see the new entry and will crash trying to re-clone.
-									-- So we just load it directly for this session; native vim.pack
-									-- will adopt it from the updated lockfile on the next startup.
-									if loader.load_fn then
-										pcall(loader.load_fn, { spec = spec, path = vim.fs.joinpath(state.native_opt_dir(), spec.name) })
-									else
-										pcall(vim.cmd.packadd, spec.name)
+					if async and async.bg_install_supported(spec) then
+						-- Non-blocking: clone in the background, then let native adopt
+						-- the finished directory (registers it + writes the lockfile).
+						async.install_via_git(spec, function(cloned)
+							if cloned then
+								-- The lockfile was written on disk by install_via_git, but native
+								-- vim.pack caches it in memory. If we call native_pack.add here,
+								-- it won't see the new entry and will crash trying to re-clone.
+								-- So we just load it directly for this session; native vim.pack
+								-- will adopt it from the updated lockfile on the next startup.
+								if loader.load_fn then
+									local ok, err = pcall(
+										loader.load_fn,
+										{ spec = spec, path = vim.fs.joinpath(state.native_opt_dir(), spec.name) }
+									)
+									if not ok then
+										vim.notify(
+											"pack: failed to load " .. spec.name .. " after background clone: " .. tostring(err),
+											vim.log.levels.ERROR
+										)
+										state.update_status(spec.name, "error")
 									end
 								else
-									state.update_status(spec.name, "error")
+									pcall(vim.cmd.packadd, spec.name)
 								end
-								advance()
-							end)
-						else
-							M._in_pack_op = true
-							local ok, err =
-								pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
-							M._in_pack_op = false
-							if not ok then
-								vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+							else
 								state.update_status(spec.name, "error")
 							end
-							
-							-- Pace synchronous native installs so they don't lock the UI indefinitely
-							if #vim.api.nvim_list_uis() == 0 then
-								advance()
-							else
-								vim.defer_fn(advance, 10)
-							end
+							advance()
+						end)
+					else
+						M._in_pack_op = true
+						local ok, err =
+							add_with_version_fallback({ spec }, { load = loader.load_fn, confirm = confirm, silent = true })
+						M._in_pack_op = false
+						if not ok then
+							vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
+							state.update_status(spec.name, "error")
+						end
+
+						-- Pace synchronous native installs so they don't lock the UI indefinitely
+						if #vim.api.nvim_list_uis() == 0 then
+							advance()
+						else
+							vim.defer_fn(advance, 10)
 						end
 					end
-					pumping = false
 				end
-				pump()
+
+				-- Native vim.pack.add() blocks until its own clone finishes; the
+				-- 10ms defer above only paces the GAP between one native item and
+				-- the next; it does nothing to stop several of them being
+				-- dispatched back-to-back in the same synchronous pump pass. Give
+				-- native-only specs (semver ranges, pins bg_install_supported
+				-- excludes) their own limit=1 queue -- strictly one full blocking
+				-- clone at a time -- while background-clonable specs keep true
+				-- concurrency up to max_workers.
+				local bg_specs, native_specs = {}, {}
+				for _, spec in ipairs(missing_specs) do
+					if async and async.bg_install_supported(spec) then
+						table.insert(bg_specs, spec)
+					else
+						table.insert(native_specs, spec)
+					end
+				end
+				queue_mod.run_queued(bg_specs, worker, max_workers)
+				queue_mod.run_queued(native_specs, worker, 1)
 			end
 
 			if vim.v.vim_did_init == 0 then

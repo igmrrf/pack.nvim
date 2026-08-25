@@ -6,7 +6,7 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 	local outdated = {}
 	for _, p in pairs(state.get_plugins()) do
 		if not p.disabled then
-			if (p.behind and p.behind > 0) or p.status == "updating" or p.status == "building" then
+			if (p.behind and p.behind > 0) or p.status == "queued_update" or p.status == "updating" or p.status == "building" then
 				if matches_search_fn(p, search_term) then
 					table.insert(outdated, p)
 				end
@@ -34,6 +34,7 @@ function M.render_outdated_tab(lines, highlights, search_term, config_ref, expan
 		local expand_icon = expanded_plugins[p.name] and "▼" or "▶"
 		local suffix = (p.status == "updating") and "updating…"
 			or (p.status == "building") and (p.build_progress and string.format("building… [%d/%d: %s]", p.build_progress.current, p.build_progress.total, p.build_progress.desc) or "building…")
+			or (p.status == "queued_update") and "queued…"
 			or ((p.behind or 0) .. " behind")
 		table.insert(
 			lines,

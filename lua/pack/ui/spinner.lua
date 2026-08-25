@@ -11,7 +11,13 @@ function M.work_in_progress()
 		return true
 	end
 	for _, p in pairs(state.get_plugins()) do
-		if p.status == "updating" or p.status == "installing" or p.status == "building" then
+		if
+			p.status == "updating"
+			or p.status == "installing"
+			or p.status == "building"
+			or p.status == "queued"
+			or p.status == "queued_update"
+		then
 			return true
 		end
 	end
