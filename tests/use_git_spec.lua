@@ -325,25 +325,26 @@ describe("pack.async use_git background operations", function()
     assert.is_true(#errors > 0, "the failure must be reported")
   end)
 
-  it("installs missing plugins with a background clone, then native add registers them + lockfile", function()
+  it("installs missing plugins with a background clone, and bypasses native cache to load directly", function()
     state.init({ plugins = { { "user/bgnew.nvim", branch = "main" } } })
     local ns = state.to_native_spec(state.get_plugins()["bgnew.nvim"])
     assert.is_not_nil(ns)
 
-    local commands, added = {}, {}
+    local commands = {}
     vim.system = fake_system(commands, 0)
+
+    -- Native add is strictly avoided because it caches the lockfile, which would
+    -- crash on a background-created directory that it didn't know about at startup.
+    local native_called = false
     local orig_add = pack.native_pack.add
-    pack.native_pack.add = function(specs, opts)
-      added[#added + 1] = vim.deepcopy(specs)
-      if opts and opts.load then
-        opts.load({ spec = specs[1], path = state.native_opt_dir() .. "/" .. specs[1].name })
-      end
+    pack.native_pack.add = function()
+      native_called = true
     end
 
     pack._install_and_load({ ns }, false)
 
     vim.wait(3000, function()
-      return #added == 1
+      return state.get_plugins()["bgnew.nvim"].status ~= "installing"
     end)
     pack.native_pack.add = orig_add
 
@@ -355,15 +356,11 @@ describe("pack.async use_git background operations", function()
     assert.is_true(vim.list_contains(commands[1].cmd, "--branch"))
     assert.is_true(vim.list_contains(commands[1].cmd, "main"))
 
-    -- ...and native adopted it (registration + lockfile entry).
-    assert.equals(1, #added)
-    assert.equals("bgnew.nvim", added[1][1].name)
-    vim.wait(1000, function()
-      return state.get_plugins()["bgnew.nvim"].status ~= "installing"
-    end)
+    -- ...and native was explicitly bypassed in favor of a direct load.
+    assert.is_false(native_called)
   end)
 
-  it("marks an install failed, cleans the partial clone, and skips native add when the clone fails", function()
+  it("marks an install failed, cleans the partial clone, and skips direct load when the clone fails", function()
     state.init({ plugins = { { "user/bgbad.nvim" } } })
     local ns = state.to_native_spec(state.get_plugins()["bgbad.nvim"])
 
@@ -402,7 +399,7 @@ describe("pack.async use_git background operations", function()
     pack.native_pack.add = orig_add
 
     assert.equals("error", state.get_plugins()["bgbad.nvim"].status)
-    assert.is_false(added, "native add must not adopt a half-cloned directory")
+    assert.is_false(added, "direct load must not be called for a half-cloned directory")
     assert.is_true(#errors > 0)
     -- The half-written directory is removed so the next startup retries cleanly.
     assert.is_not_nil(partial_dir, "the failed clone must have had a target directory")
@@ -416,22 +413,23 @@ describe("pack.async use_git background operations", function()
     -- bypassing normalize()'s own leading-dash guard on branch/tag/commit.
     local ns = { src = p.url, name = p.name, version = "-oProxyCommand=evil", data = {} }
 
-    local commands, added = {}, {}
+    local commands = {}
     vim.system = fake_system(commands, 0)
-    local orig_add = pack.native_pack.add
-    pack.native_pack.add = function(specs, opts)
-      added[#added + 1] = vim.deepcopy(specs)
-      if opts and opts.load then
-        opts.load({ spec = specs[1], path = state.native_opt_dir() .. "/" .. specs[1].name })
-      end
+    
+    local loaded = false
+    local loader = require("pack.loader")
+    local orig_load = loader.load_fn
+    loader.load_fn = function(opts)
+      loaded = true
+      orig_load(opts)
     end
 
     pack._install_and_load({ ns }, false)
 
     vim.wait(3000, function()
-      return #added == 1
+      return state.get_plugins()["dashy.nvim"].status ~= "installing"
     end)
-    pack.native_pack.add = orig_add
+    loader.load_fn = orig_load
 
     -- A default clone ran; the hostile value never appears in the git argv...
     assert.equals(1, #commands, "one plain clone, no checkout detour")
@@ -440,8 +438,7 @@ describe("pack.async use_git background operations", function()
       vim.list_contains(commands[1].cmd, "-oProxyCommand=evil"),
       "--branch must not receive a dash-leading value"
     )
-    -- ...and native still adopts the install with the pin intact for enforcement.
-    assert.equals(1, #added)
-    assert.equals("-oProxyCommand=evil", added[1][1].version)
+    -- ...and it loads directly using the bypass.
+    assert.is_true(loaded)
   end)
 end)

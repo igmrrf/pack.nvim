@@ -205,12 +205,15 @@ function M._install_and_load(native_specs, confirm)
 						-- the finished directory (registers it + writes the lockfile).
 						async.install_via_git(spec, function(cloned)
 							if cloned then
-								M._in_pack_op = true
-								local ok_add, err_add =
-									pcall(M.native_pack.add, { spec }, { load = loader.load_fn, confirm = confirm, silent = true })
-								M._in_pack_op = false
-								if not ok_add then
-									vim.notify("pack: native vim.pack.add failed: " .. tostring(err_add), vim.log.levels.WARN)
+								-- The lockfile was written on disk by install_via_git, but native
+								-- vim.pack caches it in memory. If we call native_pack.add here,
+								-- it won't see the new entry and will crash trying to re-clone.
+								-- So we just load it directly for this session; native vim.pack
+								-- will adopt it from the updated lockfile on the next startup.
+								if loader.load_fn then
+									pcall(loader.load_fn, { spec = spec, path = vim.fs.joinpath(state.native_opt_dir(), spec.name) })
+								else
+									pcall(vim.cmd.packadd, spec.name)
 								end
 							else
 								state.update_status(spec.name, "error")
