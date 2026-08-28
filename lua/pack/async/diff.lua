@@ -28,10 +28,7 @@ function M.show_diff()
 	for _, p in ipairs(outdated) do
 		local branch_suffix = p.upstream_branch and (" (" .. p.upstream_branch .. ")") or ""
 		table.insert(lines, string.format("  • %s  (%d behind)%s", p.name, p.behind or 0, branch_suffix))
-		table.insert(
-			lines,
-			string.format("    rev: %s -> %s", p.revision_before or "?", p.revision_after or "?")
-		)
+		table.insert(lines, string.format("    rev: %s -> %s", p.revision_before or "?", p.revision_after or "?"))
 		if p.pending_commits and #p.pending_commits > 0 then
 			for _, commit in ipairs(p.pending_commits) do
 				table.insert(lines, "    │ " .. commit)

@@ -19,7 +19,7 @@ M.config = {
 	plugins = {},
 	ui = {
 		border = "rounded",
-		auto_open = true, -- Automatically open dashboard float when uninstalled plugins exist
+		auto_open = true, -- Automatically open dashboard float after the first plugin install completes
 		silent = nil, -- Silences native vim.pack cmdline messages. If nil, defaults to auto_open
 		filter = "default", -- "default" (vim.ui.input) or "input" (vim.fn.input)
 		icons = {
@@ -225,11 +225,6 @@ function M._install_and_load(native_specs, confirm)
 		if #missing_specs > 0 then
 			local do_install_missing = function()
 				local auto_open = M.config and M.config.ui and (M.config.ui.auto_open ~= false)
-				if auto_open then
-					pcall(function()
-						require("pack.ui").open(M.config, { auto_opened = true })
-					end)
-				end
 
 				local use_git = M.config and M.config.use_git == true
 				local async = use_git and require("pack.async") or nil
@@ -255,6 +250,13 @@ function M._install_and_load(native_specs, confirm)
 
 					local function advance()
 						completed = completed + 1
+						-- Open the UI after the first install completes so the
+						-- dashboard is immediately interactive.
+						if auto_open then
+							pcall(function()
+								require("pack.ui").open(M.config, { auto_opened = true })
+							end)
+						end
 						if package.loaded["pack.ui"] then
 							pcall(function()
 								require("pack.ui").update()
@@ -283,7 +285,10 @@ function M._install_and_load(native_specs, confirm)
 									)
 									if not ok then
 										vim.notify(
-											"pack: failed to load " .. spec.name .. " after background clone: " .. tostring(err),
+											"pack: failed to load "
+												.. spec.name
+												.. " after background clone: "
+												.. tostring(err),
 											vim.log.levels.ERROR
 										)
 										state.update_status(spec.name, "error")
@@ -298,8 +303,10 @@ function M._install_and_load(native_specs, confirm)
 						end)
 					else
 						M._in_pack_op = true
-						local ok, err =
-							add_with_version_fallback({ spec }, { load = loader.load_fn, confirm = confirm, silent = true })
+						local ok, err = add_with_version_fallback(
+							{ spec },
+							{ load = loader.load_fn, confirm = confirm, silent = true }
+						)
 						M._in_pack_op = false
 						if not ok then
 							vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)

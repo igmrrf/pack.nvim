@@ -6,13 +6,7 @@ local M = {}
 local log_view = nil
 
 local function plugin_is_busy(p)
-	return p
-		and (
-			p.status == "installing"
-			or p.status == "updating"
-			or p.status == "building"
-			or p.checking == true
-		)
+	return p and (p.status == "installing" or p.status == "updating" or p.status == "building" or p.checking == true)
 end
 
 function M.open_popup(lines, opts)

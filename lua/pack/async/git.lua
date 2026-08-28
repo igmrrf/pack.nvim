@@ -10,12 +10,16 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 	local safe_append = vim.schedule_wrap(append_log_fn)
 
 	local function handle_chunk(data)
-		if not data then return end
+		if not data then
+			return
+		end
 		table.insert(accumulated, data)
 		line_buffer = line_buffer .. data
 		while true do
 			local pos = line_buffer:find("[\r\n]")
-			if not pos then break end
+			if not pos then
+				break
+			end
 			local line = line_buffer:sub(1, pos - 1)
 			line_buffer = line_buffer:sub(pos + 1)
 			if line ~= "" then
@@ -28,8 +32,12 @@ function M.git(plugin, args, cwd, max_log_lines, git_timeout, append_log_fn, on_
 		cwd = cwd,
 		text = true,
 		timeout = git_timeout,
-		stdout = function(_, data) handle_chunk(data) end,
-		stderr = function(_, data) handle_chunk(data) end,
+		stdout = function(_, data)
+			handle_chunk(data)
+		end,
+		stderr = function(_, data)
+			handle_chunk(data)
+		end,
 	}, function(res)
 		vim.schedule(function()
 			if line_buffer ~= "" then

@@ -98,14 +98,23 @@ function M.metadata_lines(p)
 		end
 	end
 	if p.status == "building" and p.build_progress then
-		table.insert(lines, string.format("build:    step %d/%d: %s", p.build_progress.current, p.build_progress.total, p.build_progress.desc))
+		table.insert(
+			lines,
+			string.format(
+				"build:    step %d/%d: %s",
+				p.build_progress.current,
+				p.build_progress.total,
+				p.build_progress.desc
+			)
+		)
 	end
 
 	return lines
 end
 
 function M.quick_detail_lines(p)
-	local is_busy = p and (p.status == "building" or p.status == "installing" or p.status == "updating" or p.checking == true)
+	local is_busy = p
+		and (p.status == "building" or p.status == "installing" or p.status == "updating" or p.checking == true)
 	if is_busy and p.log and #p.log > 0 then
 		local lines = { "log:" }
 		local start_idx = math.max(1, #p.log - 7)
@@ -257,7 +266,12 @@ function M.render_all_tab(
 				local build_status = ""
 				if p.status == "building" then
 					if p.build_progress then
-						build_status = string.format("  [%d/%d: %s]", p.build_progress.current, p.build_progress.total, p.build_progress.desc)
+						build_status = string.format(
+							"  [%d/%d: %s]",
+							p.build_progress.current,
+							p.build_progress.total,
+							p.build_progress.desc
+						)
 					elseif p.last_build_line then
 						build_status = string.format("  (%s)", p.last_build_line)
 					end
@@ -310,15 +324,12 @@ function M.render_all_tab(
 				end
 				local curr_pos = name_end + #time_str
 				if outdated_sign ~= "" then
-					table.insert(
-						highlights,
-						{
-							line = #lines - 1,
-							col_start = curr_pos,
-							col_end = curr_pos + #outdated_sign,
-							hl = "DiagnosticWarn",
-						}
-					)
+					table.insert(highlights, {
+						line = #lines - 1,
+						col_start = curr_pos,
+						col_end = curr_pos + #outdated_sign,
+						hl = "DiagnosticWarn",
+					})
 					curr_pos = curr_pos + #outdated_sign
 				end
 				if p.managed == false then
@@ -334,11 +345,11 @@ function M.render_all_tab(
 		end
 	end
 
-	render_group("Not Installed", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticWarn")
-	render_group("Queued", groups.queued, config_ref.ui.icons.queued, "Comment")
 	render_group("Installing", groups.installing, config_ref.ui.icons.sync, "DiagnosticWarn")
 	render_group("Updating", groups.updating, config_ref.ui.icons.sync, "DiagnosticWarn")
 	render_group("Building", groups.building, config_ref.ui.icons.sync, "DiagnosticWarn")
+	render_group("Queued", groups.queued, config_ref.ui.icons.queued, "Comment")
+	render_group("Not Installed", groups.missing, config_ref.ui.icons.not_loaded, "DiagnosticWarn")
 	render_group("Loaded", groups.loaded, config_ref.ui.icons.loaded, "DiagnosticOk")
 	render_group("Installed (Not Loaded)", groups.installed, config_ref.ui.icons.loaded, "DiagnosticInfo")
 	render_group("Errors", groups.error, config_ref.ui.icons.error, "DiagnosticError")

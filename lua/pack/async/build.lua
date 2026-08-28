@@ -72,15 +72,21 @@ local function run_build_step(plugin, hook, append_log_fn, cb)
 		local partial_stderr = ""
 
 		local function process_stream(chunk, is_err)
-			if not chunk or chunk == "" then return end
+			if not chunk or chunk == "" then
+				return
+			end
 			local text = (is_err and partial_stderr or partial_stdout) .. chunk
 			local lines = {}
 			local last_idx = 1
 			while true do
 				local nl = text:find("\n", last_idx, true)
-				if not nl then break end
+				if not nl then
+					break
+				end
 				local line = text:sub(last_idx, nl - 1)
-				if line:sub(-1) == "\r" then line = line:sub(1, -2) end
+				if line:sub(-1) == "\r" then
+					line = line:sub(1, -2)
+				end
 				table.insert(lines, line)
 				last_idx = nl + 1
 			end

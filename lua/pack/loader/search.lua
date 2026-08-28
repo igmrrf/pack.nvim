@@ -22,10 +22,15 @@ function M.build_cache()
 		if not p.disabled and p.lazy and (p.status == "installed" or p.status == "loaded") then
 			local ftdetect_dir = vim.fs.joinpath(p.dir, "ftdetect")
 			if vim.fn.isdirectory(ftdetect_dir) == 1 then
-				local files = vim.fs.find(function(name) return name:match("%.vim$") or name:match("%.lua$") end, { path = ftdetect_dir, type = "file", limit = math.huge })
+				local files = vim.fs.find(function(name)
+					return name:match("%.vim$") or name:match("%.lua$")
+				end, { path = ftdetect_dir, type = "file", limit = math.huge })
 				for _, file in ipairs(files) do
 					if file:match("%.vim$") then
-						table.insert(lines, 'vim.cmd("source " .. ' .. string.format("%q", vim.fn.fnameescape(file)) .. ")")
+						table.insert(
+							lines,
+							'vim.cmd("source " .. ' .. string.format("%q", vim.fn.fnameescape(file)) .. ")"
+						)
 					else
 						table.insert(lines, "dofile(" .. string.format("%q", file) .. ")")
 					end

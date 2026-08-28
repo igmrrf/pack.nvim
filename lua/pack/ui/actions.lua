@@ -278,7 +278,10 @@ function M.delete_one(selected_plugins, get_cursor_plugin_fn, clear_select_cb, u
 	if #names == 1 then
 		vim.notify("pack: Deleted '" .. names[1] .. "' from disk", vim.log.levels.INFO)
 	else
-		vim.notify("pack: Deleted " .. #names .. " plugins from disk (" .. table.concat(names, ", ") .. ")", vim.log.levels.INFO)
+		vim.notify(
+			"pack: Deleted " .. #names .. " plugins from disk (" .. table.concat(names, ", ") .. ")",
+			vim.log.levels.INFO
+		)
 	end
 
 	if clear_select_cb then
@@ -323,7 +326,9 @@ function M.delete_all_disabled(clear_select_cb, update_ui_cb)
 	end
 
 	vim.notify(
-		"Deleted " .. #names .. " disabled plugin(s) from disk. Remember to remove their specs from your Lua config before restarting Neovim.",
+		"Deleted "
+			.. #names
+			.. " disabled plugin(s) from disk. Remember to remove their specs from your Lua config before restarting Neovim.",
 		vim.log.levels.WARN,
 		{ title = "Pack.nvim" }
 	)

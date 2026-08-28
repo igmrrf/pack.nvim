@@ -8,7 +8,8 @@ function M.find_plugin(plugins, name, src)
 		return plugins[name]
 	end
 	for _, p in pairs(plugins) do
-		if (src and p.url and src:lower() == p.url:lower())
+		if
+			(src and p.url and src:lower() == p.url:lower())
 			or (name and p.name and (p.name .. ".nvim" == name or name .. ".nvim" == p.name))
 		then
 			return p

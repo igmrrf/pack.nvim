@@ -153,11 +153,15 @@ function M.update_log()
 end
 
 function M.sync_one()
-	return actions_mod.sync_one(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
+	return actions_mod.sync_one(selected_plugins, plugin_at_cursor, function()
+		selected_plugins = {}
+	end, M.update)
 end
 
 function M.delete_one()
-	return actions_mod.delete_one(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
+	return actions_mod.delete_one(selected_plugins, plugin_at_cursor, function()
+		selected_plugins = {}
+	end, M.update)
 end
 
 function M.toggle_select()
@@ -194,11 +198,15 @@ function M.clean()
 end
 
 function M.uninstall()
-	return actions_mod.uninstall(selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
+	return actions_mod.uninstall(selected_plugins, plugin_at_cursor, function()
+		selected_plugins = {}
+	end, M.update)
 end
 
 function M.delete_all_disabled()
-	return actions_mod.delete_all_disabled(function() selected_plugins = {} end, M.update)
+	return actions_mod.delete_all_disabled(function()
+		selected_plugins = {}
+	end, M.update)
 end
 
 function M.toggle_details()
@@ -210,11 +218,15 @@ function M.toggle_details()
 end
 
 function M.toggle_disabled()
-	return actions_mod.toggle_disabled(current_tab, selected_plugins, plugin_at_cursor, function() selected_plugins = {} end, M.update)
+	return actions_mod.toggle_disabled(current_tab, selected_plugins, plugin_at_cursor, function()
+		selected_plugins = {}
+	end, M.update)
 end
 
 function M.update_one()
-	return actions_mod.update_one(current_tab, selected_plugins, plugin_at_cursor, function() selected_plugins = {} end)
+	return actions_mod.update_one(current_tab, selected_plugins, plugin_at_cursor, function()
+		selected_plugins = {}
+	end)
 end
 
 function M.update_all_outdated()
@@ -326,11 +338,38 @@ function M.update(opts)
 	end
 
 	if current_tab == "all" then
-		render.render_all_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+		render.render_all_tab(
+			lines,
+			highlights,
+			search_term,
+			config_ref,
+			expanded_plugins,
+			selected_plugins,
+			plugin_map,
+			show_select_ui
+		)
 	elseif current_tab == "outdated" then
-		render.render_outdated_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+		render.render_outdated_tab(
+			lines,
+			highlights,
+			search_term,
+			config_ref,
+			expanded_plugins,
+			selected_plugins,
+			plugin_map,
+			show_select_ui
+		)
 	else
-		render.render_disabled_tab(lines, highlights, search_term, config_ref, expanded_plugins, selected_plugins, plugin_map, show_select_ui)
+		render.render_disabled_tab(
+			lines,
+			highlights,
+			search_term,
+			config_ref,
+			expanded_plugins,
+			selected_plugins,
+			plugin_map,
+			show_select_ui
+		)
 	end
 
 	vim.bo[buf_id].modifiable = true

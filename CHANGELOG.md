@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-28
+### Changed
+
+- **Deferred dashboard auto-open**: the `auto_open` dashboard float now opens after the first plugin install completes rather than before any clones start, so it is immediately interactive. Previously the dashboard could appear frozen while native `vim.pack.add` or background git clones were blocking the event loop.
+- **Dashboard group ordering**: active status groups (Installing, Updating, Building) are now rendered above passive groups (Not Installed, Queued) so in-progress work is visible first.
+- **Reduced default max concurrency** from 8 to 5 concurrent background workers to reduce resource pressure during bulk installs/updates.
+- **Code formatting**: applied `stylua` across all Lua source files for consistent formatting.
+
 ## [0.1.7] - 2026-08-25
 ### Added
 

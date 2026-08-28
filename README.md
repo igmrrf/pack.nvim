@@ -49,7 +49,7 @@ require("pack").setup({
   use_git = false, -- Clone/update via backgrounded `git` so the UI never blocks; native vim.pack still syncs the lockfile afterwards
   ui = {
     border = "rounded", -- Options: "single", "double", "rounded", "solid", "shadow"
-    auto_open = true,  -- Automatically open dashboard float when uninstalled plugins exist
+    auto_open = true,  -- Automatically open dashboard float after the first plugin install completes
     silent = nil,      -- Silences native vim.pack cmdline messages (defaults to auto_open setting)
     filter = "default", -- Options: "default" (vim.ui.input), "input" (vim.fn.input), or fun(opts, cb)
     icons = {

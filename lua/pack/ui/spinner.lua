@@ -66,9 +66,7 @@ function M.get_status_line(win_width)
 			break
 		end
 	end
-	local status_str = SPINNER_FRAMES[spinner_idx]
-		.. " "
-		.. (updating and "updating…" or "checking for updates…")
+	local status_str = SPINNER_FRAMES[spinner_idx] .. " " .. (updating and "updating…" or "checking for updates…")
 	local status_pad = math.max(0, math.floor((win_width - vim.fn.strdisplaywidth(status_str)) / 2))
 	return string.rep(" ", status_pad) .. status_str, true, status_pad
 end

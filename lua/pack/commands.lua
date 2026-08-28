@@ -42,7 +42,9 @@ function M.setup_user_command(pack_module)
 							if ns then
 								to_install[#to_install + 1] = ns
 							end
-						elseif (p.status == "installed" or p.status == "loaded") and (p.behind == nil or p.behind > 0) then
+						elseif
+							(p.status == "installed" or p.status == "loaded") and (p.behind == nil or p.behind > 0)
+						then
 							-- behind == nil means never checked (e.g. just added, dashboard
 							-- never opened its Outdated tab) -- sync must not silently skip
 							-- it just because no one has run an outdated check yet.

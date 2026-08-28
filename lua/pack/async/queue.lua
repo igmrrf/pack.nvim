@@ -2,7 +2,7 @@ local state = require("pack.state")
 
 local M = {}
 
-M.max_concurrency = 8
+M.max_concurrency = 5
 M.outdated_cooldown = 300
 
 function M.run_queued(items, worker, limit)

@@ -122,8 +122,8 @@ Options:
       `border`       String or Table. Window border style (e.g. "rounded").
       `filter`       String or Function. Filter input mode ("default",
                      "input", or callback).
-      `auto_open`    Boolean. Auto-open when uninstalled plugins exist
-                     (default true).
+      `auto_open`    Boolean. Auto-open after the first plugin install
+                     completes (default true).
       `silent`       Boolean. Silence native vim.pack messages
                      (defaults to auto_open).
       `icons`        Table. Custom icons for the dashboard.

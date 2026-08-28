@@ -34,11 +34,17 @@ local function ui_update()
 end
 
 local function get_progress_prefix(line)
-	if type(line) ~= "string" then return nil end
+	if type(line) ~= "string" then
+		return nil
+	end
 	local trimmed = vim.trim(line)
 	local prefix = trimmed:match("^(remote:%s*[^:]+:)")
-	if prefix then return prefix end
-	if trimmed:match("^Cloning into") then return "Cloning into" end
+	if prefix then
+		return prefix
+	end
+	if trimmed:match("^Cloning into") then
+		return "Cloning into"
+	end
 	if trimmed:match("^%s*%d+%%") or trimmed:match("^%[%s*%d+%%") then
 		return "progress_percent"
 	end
@@ -46,7 +52,9 @@ local function get_progress_prefix(line)
 end
 
 local function append_log(plugin, line)
-	if not line or line == "" then return end
+	if not line or line == "" then
+		return
+	end
 	plugin.log = plugin.log or {}
 	local new_prefix = get_progress_prefix(line)
 	if new_prefix and #plugin.log > 0 then
@@ -257,9 +265,13 @@ function M.install_missing_plugins(specs, confirm, done_cb)
 		end
 
 		pack._in_pack_op = true
-		local ok, err = pcall(pack.native_pack.add, { specs[i] }, { load = loader.load_fn, confirm = confirm, silent = true })
+		local ok, err = pcall(
+			pack.native_pack.add,
+			{ specs[i] },
+			{ load = loader.load_fn, confirm = confirm, silent = true }
+		)
 		pack._in_pack_op = false
-		
+
 		if not ok then
 			vim.notify("pack: native vim.pack.add failed: " .. tostring(err), vim.log.levels.WARN)
 		end

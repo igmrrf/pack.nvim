@@ -12,7 +12,8 @@ local function default_main(name, plugin_dir)
 	if plugin_dir and plugin_dir ~= "" then
 		local lua_dir = vim.fs.joinpath(plugin_dir, "lua")
 		for _, cand in ipairs(candidates) do
-			if vim.uv.fs_stat(vim.fs.joinpath(lua_dir, cand, "init.lua"))
+			if
+				vim.uv.fs_stat(vim.fs.joinpath(lua_dir, cand, "init.lua"))
 				or vim.uv.fs_stat(vim.fs.joinpath(lua_dir, cand .. ".lua"))
 			then
 				return cand
