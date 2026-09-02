@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-09-02
+### Added
+
+- `S`, `s`, and `:Pack sync` now also clean up unused plugins: anything present in native `vim.pack` but no longer in the user's configured specs is removed, the same way `:Pack clean` already did on demand.
+
+### Fixed
+
+- A failed or timed-out background/native update no longer clears a plugin's "N behind" badge and pending-commit list; that stale-metadata cleanup now only runs for the genuine no-op case (nothing was outdated before the update), so a real failure still surfaces as outdated instead of silently looking up to date.
+
 ## [0.1.8] - 2026-08-28
 ### Changed
 

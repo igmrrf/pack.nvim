@@ -599,6 +599,16 @@ function M.update_plugins(names)
 				else
 					state.update_status(name, p.status_before_update or "installed")
 					p.status_before_update = nil
+					if not p._update_had_pending then
+						-- Mirror finish_update() in build.lua, but only for the genuine
+						-- no-op case (nothing was behind before this update): clear
+						-- outdated metadata so the dashboard drops any stale "N behind"
+						-- badge. On a real failure (from_timer=false) or a timed-out wait
+						-- for a real pending update, leave behind/outdated_detail alone --
+						-- clearing it here would hide that the plugin is still outdated.
+						state.set_behind(name, 0)
+						state.set_outdated_detail(name, {})
+					end
 					p._update_had_pending = nil
 					p._update_ticks = nil
 				end

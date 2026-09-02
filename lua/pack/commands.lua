@@ -52,13 +52,37 @@ function M.setup_user_command(pack_module)
 						end
 					end
 				end
+
+				-- Clean pass: remove plugins that exist on disk / in native
+				-- vim.pack but are no longer in the user's configured specs
+				-- (i.e. managed == false, shown as "(native)" in the dashboard).
+				local to_clean = {}
+				local ok_get, managed_list = pcall(function()
+					return pack_module.native_pack.get and pack_module.native_pack.get(nil, { info = false }) or {}
+				end)
+				if ok_get and type(managed_list) == "table" then
+					local configured = state.get_plugins()
+					for _, entry in ipairs(managed_list) do
+						local name = entry.spec and entry.spec.name
+						if name and not (configured[name] and configured[name].managed) then
+							to_clean[#to_clean + 1] = name
+						end
+					end
+				end
+				for _, name in ipairs(to_clean) do
+					pcall(function()
+						vim.pack.del({ name })
+					end)
+					vim.notify("pack: Removed unused plugin " .. name)
+				end
+
 				if #to_install > 0 then
 					pack_module._install_and_load(to_install, false)
 				end
 				if #to_update > 0 then
 					require("pack.async").update_plugins(to_update)
 				end
-				if #to_install == 0 and #to_update == 0 then
+				if #to_install == 0 and #to_update == 0 and #to_clean == 0 then
 					vim.notify("pack: everything is up to date", vim.log.levels.INFO)
 				end
 			end
